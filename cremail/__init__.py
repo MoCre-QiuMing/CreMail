@@ -9,7 +9,7 @@ For more information, please check the documentation at:
 https://github.com/MoCre-QiuMing/CreMail
 """
 
-from .cremail import (
+from .CreMail import (
     CreMail,
     SendResult,
     ConfigProvider,

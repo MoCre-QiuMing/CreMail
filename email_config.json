@@ -1,0 +1,6 @@
+{
+  "smtp_server": "smtp_server",
+  "smtp_port": smtp_port,
+  "email": "you_email",
+  "password": "you_password"
+}

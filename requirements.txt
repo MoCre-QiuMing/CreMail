@@ -1,0 +1,7 @@
+# 用于模板渲染（可选）
+#For template rendering (optional)
+jinja2>=3.0.0
+
+# 用于异步发送（可选）
+#For asynchronous sending (optional)
+aiosmtplib>=3.0.0

@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "CreMail"
+version = "1.2.1"
+authors = [
+    {name = "QiuMing", email = "mocre_rx@foxmail.com"},
+]
+description = "A powerful and easy-to-use Python email sending module with support for multiple configuration methods, async sending, and verification code generation."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.6"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Email",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "aiosmtplib>=3.0.0; python_version>='3.6'",  
+    "jinja2>=3.0.0; python_version>='3.6'",    
+]
+
+[project.optional-dependencies]
+async = ["aiosmtplib>=3.0.0"]
+template = ["jinja2>=3.0.0"]
+all = ["aiosmtplib>=3.0.0", "jinja2>=3.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/MoCre-QiuMing/CreMail"
+Repository = "https://github.com/MoCre-QiuMing/CreMail"
+"Bug Tracker" = "https://github.com/MoCre-QiuMing/CreMail/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cremail*"]

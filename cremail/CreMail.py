@@ -173,7 +173,7 @@ class AioSMTPLibClient:
 
             return await aiosmtplib.send(
 
-                message=message,
+                message,
 
                 hostname=hostname,
 
@@ -203,7 +203,7 @@ class AioSMTPLibClient:
 
             return await aiosmtplib.send(
 
-                message=message,
+                message,
 
                 hostname=hostname,
 
@@ -760,7 +760,7 @@ class CreMail:
                     logger.warning(f"Ignoring {len(attachment_errors)} attachment error(s) and continuing to send email.")
                 
                 await aiosmtplib.send(
-                    message=msg,
+                    msg,
                     hostname=self.smtp_server,
                     port=self.smtp_port,
                     username=self.email,

@@ -60,7 +60,7 @@
 | Verification Code Gen | ✅ Built-in | ❌ None | ❌ None | ❌ None |
 | Modular Design | ✅ Advanced | ❌ Low | ❌ Medium | ❌ Low |
 | Display Names | ✅ Supported | ✅ Supported | ✅ Supported | ❌ None |
-| Email Validation | ✅ Pre-send Validation | ❌ Error on send | ❌ Error on send | ❌ Error on send |
+| Email Validation | ✅ Pre-send Validation | ❌ Send-time validation | ❌ Send-time validation | ❌ Send-time validation |
 
 CreMail excels in functionality, security, and usability compared to other modules, especially suitable for scenarios requiring high performance and security.
 

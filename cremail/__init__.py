@@ -43,8 +43,8 @@ from .CreMail import (
     get_password_securely
 )
 
-__version__ = "1.2.1"
-__author__ = "Your Name"
+__version__ = "2.1.1"
+__author__ = "QiuMing"
 __license__ = "MIT"
 __all__ = [
     'CreMail',

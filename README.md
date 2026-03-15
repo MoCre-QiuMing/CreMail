@@ -421,7 +421,7 @@ asyncio.run(batch_send_example())
 
 ### Class: CreMail
 
-#### `__init__(self, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, config_provider=None, max_attachment_size=10485760, timeout=30, use_tls=True, use_ssl=False, provider_priority=False, from_display_name=None, smtp_client=None, password_callback=None)`
+#### `__init__(self, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, config_provider=None, max_attachment_size=10485760, timeout=30, use_tls=True, use_ssl=False, provider_priority=False, from_display_name=None, smtp_client=None, password_callback=None, log_file=None)`
 
 Initialize email sender.
 
@@ -441,6 +441,7 @@ Initialize email sender.
 - `from_display_name` (str, optional): Sender display name
 - `smtp_client` (SMTPClient, optional): SMTP client implementation
 - `password_callback` (callable, optional): Password retrieval callback function
+- `log_file` (str, optional): Log file path for writing logs to file. Can be absolute path or relative path (relative to current working directory). Default: None, logs to console only
 
 #### `send_email(self, recipient_email: Union[str, List[str]], subject: str, content: Union[str, dict], content_type: str = "html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", total_timeout: float = None) -> SendResult`
 
@@ -553,13 +554,59 @@ Provides render_template function, requires jinja2 library.
 
 ### Logging
 
-The module uses standard logging module for logging. Main log events include:
+The module provides flexible logging options with user-friendly error messages that include troubleshooting suggestions. Main log events include:
 
 - `INFO`: Email sent successfully
 - `WARNING`: Configuration file does not exist
 - `ERROR`: Configuration file format error, email sending failure, attachment handling errors, etc.
 
-The module uses a logger named cremail, which you can configure separately via logging.getLogger('cremail').
+You can configure logging in two ways:
+
+1. Using the `log_file` parameter in CreMail initialization to write logs to a file:
+```python
+from cremail import CreMail
+
+# Write logs to a file
+sender = CreMail(log_file='cremail.log')
+result = sender.send_email(
+    "user@example.com",
+    "Test Email",
+    "This is a test email.",
+    "plain"
+)
+```
+
+2. Using standard Python logging module (traditional approach):
+```python
+import logging
+from cremail import CreMail
+
+# Configure logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('cremail')
+logger.setLevel(logging.INFO)
+
+# Or add custom handlers
+handler = logging.FileHandler('cremail.log')
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+sender = CreMail()
+result = sender.send_email(
+    "user@example.com",
+    "Test Email",
+    "This is a test email.",
+    "plain"
+)
+```
+
+The improved logging system now provides clear, actionable error messages with troubleshooting tips to help users quickly identify and resolve common issues such as:
+- SMTP connection errors (check server address and port)
+- Authentication errors (verify email and password/authorization code)
+- Recipient errors (verify email addresses)
+- Attachment errors (check file paths and sizes)
+- Configuration errors (verify file format and permissions)
 
 ## 💡 Examples
 

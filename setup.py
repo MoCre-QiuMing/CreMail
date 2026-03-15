@@ -8,9 +8,9 @@ def read_readme():
 
 setup(
     name="CreMail",
-    version="1.2.1",
-    author="Your Name",
-    author_email="your.email@example.com",
+    version="2.1.1",
+    author="QiuMing",
+    author_email="mocre_rx@foxmail.com",
     description="A powerful and easy-to-use Python email sending module with support for multiple configuration methods, async sending, and verification code generation.",
     long_description=read_readme(),
     long_description_content_type="text/markdown",

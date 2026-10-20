@@ -4,7 +4,7 @@
 
 [![中文](CreMail_zh.md)](CreMail_zh.md) | [![English](README.md)](README.md)
 
-[![Python](https://img.shields.io/badge/Python-3.6%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 **一个功能强大且易于使用的Python邮件发送模块**
@@ -34,13 +34,14 @@
 
 关于 CreMail 与原生 **smtplib** 的关系，以及封装带来的代价，做一个客观说明：
 
-**依赖问题**：同步发信完全零依赖（**smtplib** 是标准库）；异步发送和模板渲染需要 **aiosmtplib** 与 **jinja2**，但通过以下命令安装会自动为你装好，无需手动复装：
+**依赖问题**：同步发信完全零依赖（**smtplib** 是标准库），`pip install CreMail` 不额外拉取任何依赖。异步发送与模板渲染为可选能力，需要时通过 extras 安装：
 
 ```bash
-pip install git+https://github.com/MoCre-QiuMing/CreMail.git
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git[async]    # 异步发送
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git[all]      # 异步 + 模板
 ```
 
-只有当你选择直接复制 **cremail.py** 源码扔进项目时，才需要注意这两个依赖。
+只有当你选择直接复制 **cremail.py** 源码扔进项目时，才需要自行安装 `aiosmtplib` / `jinja2`。
 
 **底层控制**：如果你需要执行极端的底层 SMTP 扩展命令或进行精细的 socket 层操作，原生 **smtplib** 更灵活；但在 99% 的业务场景下，CreMail 的封装层性能损耗几乎可以忽略不计。
 
@@ -61,11 +62,11 @@ pip install git+https://github.com/MoCre-QiuMing/CreMail.git
 - **邮箱验证**: 发送前验证邮箱格式，避免无效地址
 - **优先级支持**: 支持邮件优先级设置
 - **全局实例**: 提供默认实例，减少重复配置
-- **幂等Message-ID**: 每封邮件（含重试）复用由`make_msgid()`生成的真实Message-ID，便于去重与追踪（2.2.0）
-- **防重复发送**: 发送过程中服务端断开连接（邮件可能已投递，如QQ短时频控）时，不再盲目重试，返回"投递状态未知"结果（2.2.0）
-- **内置限流**: `daily_send_limit`和`rate_limit_delay`自2.2.0起真正生效
-- **工具函数导出**: `validate_email_address`、`validate_email_list`、`format_email_with_name`已在包顶层导出（2.2.0）
-- **异步SSL支持**: 异步发送支持`use_ssl`（SMTP over SSL，465端口）（2.2.0）
+- **幂等Message-ID**: 每封邮件（含重试）复用由`make_msgid()`生成的真实Message-ID，便于去重与追踪（2.2.1）
+- **防重复发送**: 发送过程中服务端断开连接（邮件可能已投递，如QQ短时频控）时，不再盲目重试，返回"投递状态未知"结果（2.2.1）
+- **内置限流**: `daily_send_limit`和`rate_limit_delay`自2.2.1起真正生效
+- **工具函数导出**: `validate_email_address`、`validate_email_list`、`format_email_with_name`已在包顶层导出（2.2.1）
+- **异步SSL支持**: 异步发送支持`use_ssl`（SMTP over SSL，465端口）（2.2.1）
 
 ## 📊 与其他邮件模块对比
 
@@ -367,7 +368,7 @@ except Exception as e:
     print(f"其他错误: {e}")
 ```
 
-> **错误语义（自2.2.0起）**: 确定性错误——非法收件人（`ValueError`）、内容为空/非法（`ContentValidationError`）、附件超限（`SizeLimitError`）等校验与构建错误——会**直接抛出异常**且不会被重试；网络/发送类错误（认证失败、连接断开、超时）则返回 `SendResult(success=False)`。请在 try/except 中处理校验错误，并检查 `result.success` 处理发送错误。
+> **错误语义（自2.2.1起）**: 确定性错误——非法收件人（`ValueError`）、内容为空/非法（`ContentValidationError`）、附件超限（`SizeLimitError`）等校验与构建错误——会**直接抛出异常**且不会被重试；网络/发送类错误（认证失败、连接断开、超时）则返回 `SendResult(success=False)`。请在 try/except 中处理校验错误，并检查 `result.success` 处理发送错误。
 
 ### 方法9: 使用重试机制
 
@@ -385,7 +386,7 @@ result = sender.send_email(
 )
 ```
 
-> **注意（自2.2.0起）**: 重试会复用同一个 `Message-ID`。若发送过程中服务端断开连接（`SMTPServerDisconnected`），邮件可能已被投递，CreMail 不会自动重试，而是返回标注"可能已送达"的 `SendResult`——请不要盲目重发同一封邮件。
+> **注意（自2.2.1起）**: 重试会复用同一个 `Message-ID`。若发送过程中服务端断开连接（`SMTPServerDisconnected`），邮件可能已被投递，CreMail 不会自动重试，而是返回标注"可能已送达"的 `SendResult`——请不要盲目重发同一封邮件。
 
 ### 方法10: 使用异步发送
 
@@ -492,9 +493,9 @@ asyncio.run(batch_send_example())
 
 #### `send_email_with_config(recipient_email, subject, content, config_file="email_config.json", content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", password_callback=None, total_timeout: float = None, timeout: int = 30, max_attachment_size: int = 10485760, use_tls: bool = True, use_ssl: bool = False) -> SendResult`
 
-使用配置文件发送邮件的常规函数。自2.2.0起新增并透传 `total_timeout`、`timeout`、`max_attachment_size`、`use_tls`、`use_ssl` 参数。
+使用配置文件发送邮件的常规函数。自2.2.1起新增并透传 `total_timeout`、`timeout`、`max_attachment_size`、`use_tls`、`use_ssl` 参数。
 
-#### `async_send_email(recipient_email, subject, content, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, max_attachment_size: int = 10485760, total_timeout: float = None, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", from_display_name: str = None) -> SendResult`
+#### `async_send_email(recipient_email, subject, content, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, max_attachment_size: int = 10485760, total_timeout: float = None, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", from_display_name: str = None, use_tls: bool = True, use_ssl: bool = False) -> SendResult`
 
 异步发送邮件的函数（需要安装aiosmtplib库）。
 
@@ -529,15 +530,15 @@ asyncio.run(batch_send_example())
 
 #### `validate_email_address(email: str) -> bool`
 
-校验邮箱地址是否有效。自2.2.0起在包顶层导出。
+校验邮箱地址是否有效。自2.2.1起在包顶层导出。
 
 #### `validate_email_list(emails: List[str]) -> List[str]`
 
-校验邮箱地址列表，若存在非法地址则抛出 `ValueError`。自2.2.0起在包顶层导出。
+校验邮箱地址列表，若存在非法地址则抛出 `ValueError`。自2.2.1起在包顶层导出。
 
 #### `format_email_with_name(email: str, display_name: str) -> str`
 
-将邮箱地址与显示名称组合为 `"名称 <邮箱>"` 格式。自2.2.0起在包顶层导出。
+将邮箱地址与显示名称组合为 `"名称 <邮箱>"` 格式。自2.2.1起在包顶层导出。
 
 ### 自定义异常类
 
@@ -548,10 +549,10 @@ asyncio.run(batch_send_example())
 - `SMTPConnectionError`: SMTP连接错误
 - `AttachmentError`: 附件处理错误
 - `SizeLimitError`: 附件大小限制错误
-- `RateLimitError`: 发送频率限制错误（自2.2.0起真正生效）
+- `RateLimitError`: 发送频率限制错误（自2.2.1起真正生效）
 - `ContentValidationError`: 内容验证错误
 
-> 自2.2.0起：`SizeLimitError` 会直接抛出（不再被包装成 `AttachmentError`），调用方可区分"附件超限"与其他附件错误（如文件缺失）。
+> 自2.2.1起：`SizeLimitError` 会直接抛出（不再被包装成 `AttachmentError`），调用方可区分"附件超限"与其他附件错误（如文件缺失）。
 
 ### SendResult类
 
@@ -582,13 +583,13 @@ asyncio.run(batch_send_example())
 
 send_email方法支持max_retries参数，默认为2次重试，使用指数退避算法和随机抖动，并支持总超时控制。
 
-自2.2.0起：重试复用同一个 `Message-ID`（幂等）。消息构建与附件处理在重试循环之外只执行一次，因此确定性错误会立即抛出且从不重试。若发送过程中服务端断开连接（`SMTPServerDisconnected`），邮件可能已被投递，不会盲目重试——返回的 `SendResult` 会标注"可能已送达"。
+自2.2.1起：重试复用同一个 `Message-ID`（幂等）。消息构建与附件处理在重试循环之外只执行一次，因此确定性错误会立即抛出且从不重试。若发送过程中服务端断开连接（`SMTPServerDisconnected`），邮件可能已被投递，不会盲目重试——返回的 `SendResult` 会标注"可能已送达"。
 
 ### 异步支持
 
 提供async_send_email异步函数和batch_send批量发送功能，需要安装aiosmtplib库。
 
-自2.2.0起：异步发送除支持STARTTLS外，还支持 `use_ssl`（SMTP over SSL，465端口）。
+自2.2.1起：异步发送除支持STARTTLS外，还支持 `use_ssl`（SMTP over SSL，465端口）。
 
 ### 模板渲染
 

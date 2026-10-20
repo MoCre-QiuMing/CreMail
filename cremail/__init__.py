@@ -46,7 +46,7 @@ from .CreMail import (
     format_email_with_name
 )
 
-__version__ = "2.2.0"
+__version__ = "2.2.1"
 __author__ = "QiuMing"
 __license__ = "MIT"
 __all__ = [

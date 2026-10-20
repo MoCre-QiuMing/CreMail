@@ -5,10 +5,10 @@
 本脚本为【本地离线】测试：通过 mock 的 SMTP 客户端替代真实发送，全程【不会】
 向任何真实邮箱外发邮件，也【不需要】 email_config.json 配置文件。
 验证范围：配置加载、纯文本/HTML/附件/忽略附件错误/CC-BCC/异步/批量/模板/
-默认发送者/验证码/快捷函数，以及 2.2.0 新增的可靠性修复（去重、幂等 Message-ID、
+默认发送者/验证码/快捷函数，以及 2.2.1 新增的可靠性修复（去重、幂等 Message-ID、
 连接断开不盲发、附件超限异常分类、限流、工具函数导出、版本号）。
 
-运行：python 单元测试.py   （需在 2.2.0 目录内，或本目录包含 cremail 包）
+运行：python 单元测试.py   （需在 2.2.1 目录内，或本目录包含 cremail 包）
 """
 
 import os
@@ -52,7 +52,7 @@ try:
     import cremail as cremail_pkg
 except ImportError as e:
     print(f"❌ 导入 cremail 失败: {e}")
-    print("请确认在 2.2.0 目录下运行，或设置 PYTHONPATH 指向 2.2.0 目录。")
+    print("请确认在 2.2.1 目录下运行，或设置 PYTHONPATH 指向 2.2.1 目录。")
     sys.exit(1)
 
 # ========== 假配置与 mock 客户端 ==========
@@ -145,7 +145,7 @@ def test_config_loading():
     assert s.smtp_port, "SMTP端口未配置"
     assert s.email, "发件人邮箱未配置"
     assert s.password, "密码未配置"
-    # 缺失配置应抛 ConfigError（2.2.0 仍保持）
+    # 缺失配置应抛 ConfigError（2.2.1 仍保持）
     try:
         CreMail(config_dict={"smtp_server": "x"}, config_file=None)
         raise AssertionError("缺失配置未抛 ConfigError")
@@ -275,7 +275,7 @@ def test_send_with_config():
     assert r.success
     assert inst.send_email.called
 
-# ===== 2.2.0 新增可靠性/API 验证 =====
+# ===== 2.2.1 新增可靠性/API 验证 =====
 
 # 13. 收件人去重（_collect_recipients 行为）
 def test_recipient_dedup_build():
@@ -340,7 +340,36 @@ def test_validate_exported():
 
 # 19. 版本号
 def test_version():
-    assert cremail_pkg.__version__ == "2.2.0", f"版本应为 2.2.0，实际 {cremail_pkg.__version__}"
+    assert cremail_pkg.__version__ == "2.2.1", f"版本应为 2.2.1，实际 {cremail_pkg.__version__}"
+
+# 20. 异步参数回归（真实触达 aiosmtplib 构造，验证 use_tls 而非 use_ssl）
+def test_async_params():
+    import importlib
+    from email.mime.text import MIMEText
+    cm = importlib.import_module("cremail.CreMail")
+    msg = MIMEText("hi")
+    msg['To'] = "user@example.com"
+    msg['Cc'] = ""
+    with mock.patch.object(cm.aiosmtplib, "SMTP") as MockSMTP:
+        inst = mock.AsyncMock()
+        inst.__aenter__.return_value = inst
+        inst.__aexit__.return_value = False
+        MockSMTP.return_value = inst
+        client = AioSMTPLibClient()
+        # use_ssl=False → use_tls=False（STARTTLS 语义）
+        asyncio.run(client.async_send_message(msg, hostname="smtp.test.com", port=587,
+                                              username="u", password="p", use_ssl=False,
+                                              recipients=["user@example.com"]))
+        kw = MockSMTP.call_args.kwargs
+        assert "use_ssl" not in kw, f"不应传 use_ssl 参数: {kw}"
+        assert kw.get("use_tls") is False, f"use_ssl=False 应映射为 use_tls=False: {kw}"
+        # use_ssl=True → use_tls=True（SSL 直连，465）
+        asyncio.run(client.async_send_message(msg, hostname="smtp.test.com", port=465,
+                                              username="u", password="p", use_ssl=True,
+                                              recipients=["user@example.com"]))
+        kw = MockSMTP.call_args.kwargs
+        assert "use_ssl" not in kw, f"不应传 use_ssl 参数: {kw}"
+        assert kw.get("use_tls") is True, f"use_ssl=True 应映射为 use_tls=True: {kw}"
 
 # ========== 执行测试 ==========
 def main():
@@ -365,7 +394,8 @@ def main():
         ("重试幂等Message-ID", test_retry_same_msgid),
         ("内置限流", test_daily_limit),
         ("工具函数顶层导出", test_validate_exported),
-        ("版本号2.2.0", test_version),
+        ("版本号2.2.1", test_version),
+        ("异步参数回归", test_async_params),
     ]
     try:
         for name, fn in tests:

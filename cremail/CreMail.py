@@ -172,7 +172,7 @@ class AioSMTPLibClient:
         smtp = aiosmtplib.SMTP(
             hostname=hostname,
             port=port,
-            use_ssl=use_ssl,
+            use_tls=use_ssl,
             start_tls=start_tls and not use_ssl,
             timeout=timeout,
         )
@@ -210,8 +210,12 @@ class SMTPLibClient:
                     all_recipients = to_recipients + cc_recipients
                     result = server.sendmail(username, all_recipients if all_recipients else message['To'], text)
                 return result
-    async def async_send_message(self, message, hostname: str, port: int, username: str, password: str, start_tls: bool = True, timeout: int = 30, recipients: list = None):
-        raise NotImplementedError("SMTPLibClient does not support asynchronous sending. Use AioSMTPLibClient instead.")
+    async def async_send_message(self, message, hostname: str, port: int, username: str, password: str, start_tls: bool = True, use_ssl: bool = False, timeout: int = 30, recipients: list = None):
+        # 用线程池包装同步 connect_and_send，让默认客户端也能支持异步/批量发送（零依赖，不强制 aiosmtplib）
+        return await asyncio.to_thread(
+            self.connect_and_send, message, hostname, port, username, password,
+            start_tls and not use_ssl, use_ssl, timeout, recipients,
+        )
 
 class SendResult:
     def __init__(self, success: bool, message_id: str = None, error_detail: str = None, accepted_recipients: list = None, timestamp: float = None, exception: Exception = None):
@@ -492,6 +496,22 @@ class CreMail:
         self._last_sent_time = time.time()
         self._sent_today += 1
 
+    async def _athrottle(self) -> None:
+        """异步限流：与 _throttle 同语义，但用 asyncio.sleep 避免阻塞事件循环。"""
+        today = time.strftime('%Y-%m-%d')
+        if self._sent_date != today:
+            self._sent_date = today
+            self._sent_today = 0
+        if self._sent_today >= self.daily_send_limit:
+            raise RateLimitError(f"Daily send limit ({self.daily_send_limit}) reached")
+        now = time.time()
+        if self._last_sent_time is not None and self.rate_limit_delay > 0:
+            elapsed = now - self._last_sent_time
+            if elapsed < self.rate_limit_delay:
+                await asyncio.sleep(self.rate_limit_delay - elapsed)
+        self._last_sent_time = time.time()
+        self._sent_today += 1
+
     def validate_content(self, content: Union[str, dict]) -> None:
         if content is None:
             raise ContentValidationError("邮件内容不能为None")
@@ -550,6 +570,7 @@ class CreMail:
         if bcc_recipients:
             validate_email_list(bcc_recipients)
         all_recipients = _collect_recipients(recipient_email, cc_recipients, bcc_recipients)
+        await self._athrottle()
         msgid = make_msgid()
         # 消息构建与附件处理与网络无关，只做一次；确定性错误在此直接抛出，不进入重试
         msg = _build_mime_message(
@@ -664,8 +685,13 @@ class CreMail:
                     timeout=self.timeout,
                     recipients=all_recipients
                 )
+                refused = result if result else {}  # smtplib.sendmail 返回 {被拒收地址: 原因}
+                accepted = [r for r in all_recipients if r not in refused] if refused else all_recipients
+                if refused:
+                    logger.warning(f"部分收件人被拒收: {refused}")
+                    return SendResult(success=False, message_id=msgid, error_detail=f"部分收件人被拒收: {refused}", accepted_recipients=accepted)
                 logger.info(f"Email sent successfully to {recipient_email}")
-                return SendResult(success=True, message_id=msgid, accepted_recipients=list(result.keys()) if result else all_recipients)
+                return SendResult(success=True, message_id=msgid, accepted_recipients=accepted)
             except smtplib.SMTPAuthenticationError as e:
                 logger.exception(f"SMTP authentication error: {str(e)}")
                 return SendResult(success=False, error_detail=f"SMTP authentication error: {str(e)}", exception=e)
@@ -715,23 +741,19 @@ def send_email_with_config(
     use_tls: bool = True,
     use_ssl: bool = False
 ) -> SendResult:
-    try:
-        email_sender = CreMail(
-            config_file=config_file,
-            password_callback=password_callback,
-            timeout=timeout,
-            max_attachment_size=max_attachment_size,
-            use_tls=use_tls,
-            use_ssl=use_ssl,
-        )
-        return email_sender.send_email(
-            recipient_email, subject, content, content_type,
-            attachments, ignore_attachment_errors, max_retries,
-            cc_recipients, bcc_recipients, reply_to, priority, total_timeout
-        )
-    except Exception as e:
-        logger.error(f"Error sending email: {str(e)}")
-        return SendResult(success=False, error_detail=str(e))
+    email_sender = CreMail(
+        config_file=config_file,
+        password_callback=password_callback,
+        timeout=timeout,
+        max_attachment_size=max_attachment_size,
+        use_tls=use_tls,
+        use_ssl=use_ssl,
+    )
+    return email_sender.send_email(
+        recipient_email, subject, content, content_type,
+        attachments, ignore_attachment_errors, max_retries,
+        cc_recipients, bcc_recipients, reply_to, priority, total_timeout
+    )
 
 def generate_verification_code(length: int = 6) -> str:
     return generate_verification_code_unified(length, mode=VERIFICATION_CODE_DIGITS)
@@ -784,7 +806,9 @@ async def async_send_email(
     bcc_recipients: List[str] = None,
     reply_to: str = None,
     priority: Literal["high", "normal", "low"] = "normal",
-    from_display_name: str = None
+    from_display_name: str = None,
+    use_tls: bool = True,
+    use_ssl: bool = False
 ) -> SendResult:
     if not _HAS_AIOSMTPLIB:
         raise ImportError("aiosmtplib is required for async email sending. Install with: pip install aiosmtplib")
@@ -797,7 +821,9 @@ async def async_send_email(
         config_dict=config_dict,
         max_attachment_size=max_attachment_size,
         from_display_name=from_display_name,
-        smtp_client=AioSMTPLibClient()
+        smtp_client=AioSMTPLibClient(),
+        use_tls=use_tls,
+        use_ssl=use_ssl,
     )
     return await sender._async_send_individual_email(
         recipient_email=recipient_email,

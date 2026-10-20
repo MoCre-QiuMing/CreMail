@@ -8,7 +8,7 @@ def read_readme():
 
 setup(
     name="CreMail",
-    version="2.2.0",
+    version="2.2.1",
     author="QiuMing",
     author_email="mocre_rx@foxmail.com",
     description="A powerful and easy-to-use Python email sending module with support for multiple configuration methods, async sending, and verification code generation.",
@@ -22,8 +22,6 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
@@ -33,11 +31,9 @@ setup(
         "Topic :: Communications :: Email",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
-    python_requires=">=3.6",
-    install_requires=[
-        "aiosmtplib>=3.0.0; python_version>='3.6'", 
-        "jinja2>=3.0.0; python_version>='3.6'",     
-    ],
+    python_requires=">=3.8",
+    # 同步发信零依赖：aiosmtplib/jinja2 按需通过 extras 安装（async/template/all）
+    install_requires=[],
     extras_require={
         "async": ["aiosmtplib>=3.0.0"],
         "template": ["jinja2>=3.0.0"],

@@ -1,6 +1,6 @@
 {
-  "smtp_server": "smtp_server",
-  "smtp_port": smtp_port,
-  "email": "you_email",
-  "password": "you_password"
+  "smtp_server": "smtp.example.com",
+  "smtp_port": 587,
+  "email": "you@example.com",
+  "password": "your_password"
 }

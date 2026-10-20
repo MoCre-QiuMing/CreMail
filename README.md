@@ -32,17 +32,17 @@
 
 ## ⚖️ Technical Selection & Wrapping Cost
 
-An honest note on how CreMail relates to the native `smtplib`, and what the wrapper costs:
+An honest note on how CreMail relates to the native **smtplib**, and what the wrapper costs:
 
-**Dependencies:** Synchronous sending is fully zero-dependency (`smtplib` is part of the standard library). Async sending and template rendering need `aiosmtplib` and `jinja2`, but they are installed automatically by:
+**Dependencies:** Synchronous sending is fully zero-dependency (**smtplib** is part of the standard library). Async sending and template rendering need **aiosmtplib** and **jinja2**, but they are installed automatically by:
 
 ```bash
 pip install git+https://github.com/MoCre-QiuMing/CreMail.git
 ```
 
-No manual reinstall needed. Only when you choose to copy the `cremail.py` source directly into your project do you need to watch for these two dependencies.
+No manual reinstall needed. Only when you choose to copy the **cremail.py** source directly into your project do you need to watch for these two dependencies.
 
-**Low-level control:** If you need to execute extreme low-level SMTP extension commands or fine-grained socket-layer operations, native `smtplib` is more flexible. But for ~99% of business scenarios, the wrapping overhead of CreMail is negligible.
+**Low-level control:** If you need to execute extreme low-level SMTP extension commands or fine-grained socket-layer operations, native **smtplib** is more flexible. But for ~99% of business scenarios, the wrapping overhead of CreMail is negligible.
 
 ## ✨ Features
 

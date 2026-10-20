@@ -14,7 +14,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-from email.utils import formataddr, parseaddr
+from email.utils import formataddr, parseaddr, make_msgid
 from typing import Optional, Union, List, Dict, Any, Protocol, TypedDict, Literal
 from abc import abstractmethod
 
@@ -70,7 +70,10 @@ __all__ = [
     'generate_verification_code_unified',
     'get_default_sender',
     'send_email_with_default_sender',
-    'get_password_securely'
+    'get_password_securely',
+    'validate_email_address',
+    'validate_email_list',
+    'format_email_with_name'
 ]
 
 class EmailSendError(Exception):
@@ -128,15 +131,19 @@ class DatabaseConfigProvider:
     def __init__(self, connection_string: str):
         self.connection_string = connection_string
     def get_config(self) -> Dict[str, Any]:
-        logger.warning("Database config provider is not fully implemented yet.")
-        return {}
+        raise NotImplementedError(
+            "DatabaseConfigProvider is not implemented yet. "
+            "Use JSONConfigProvider or pass config_dict / config_file instead."
+        )
 
 class RemoteConfigProvider:
     def __init__(self, api_endpoint: str):
         self.api_endpoint = api_endpoint
     def get_config(self) -> Dict[str, Any]:
-        logger.warning("Remote config provider is not fully implemented yet.")
-        return {}
+        raise NotImplementedError(
+            "RemoteConfigProvider is not implemented yet. "
+            "Use JSONConfigProvider or pass config_dict / config_file instead."
+        )
 
 class EmailContent(TypedDict, total=False):
     html: str
@@ -155,34 +162,23 @@ class SMTPClient(Protocol):
         ...
 
 class AioSMTPLibClient:
-    async def async_send_message(self, message, hostname: str, port: int, username: str, password: str, start_tls: bool = True, timeout: int = 30, recipients: list = None):
+    async def async_send_message(self, message, hostname: str, port: int, username: str, password: str, start_tls: bool = True, use_ssl: bool = False, timeout: int = 30, recipients: list = None):
         if not _HAS_AIOSMTPLIB:
             raise ImportError("aiosmtplib is required for async email sending. Install with: pip install aiosmtplib")
-        if recipients:
-            return await aiosmtplib.send(
-                message,
-                hostname=hostname,
-                port=port,
-                username=username,
-                password=password,
-                start_tls=start_tls,
-                timeout=timeout,
-                recipients=recipients
-            )
-        else:
+        if not recipients:
             to_recipients = [parseaddr(addr.strip())[1] for addr in message['To'].split(',')] if message.get('To') else []
             cc_recipients = [parseaddr(addr.strip())[1] for addr in message.get('Cc', '').split(',')] if message.get('Cc') else []
-            all_recipients = to_recipients + cc_recipients
-            return await aiosmtplib.send(
-                message,
-                hostname=hostname,
-                port=port,
-                username=username,
-                password=password,
-                start_tls=start_tls,
-                timeout=timeout,
-                recipients=all_recipients if all_recipients else to_recipients
-            )
+            recipients = to_recipients + cc_recipients
+        smtp = aiosmtplib.SMTP(
+            hostname=hostname,
+            port=port,
+            use_ssl=use_ssl,
+            start_tls=start_tls and not use_ssl,
+            timeout=timeout,
+        )
+        async with smtp:
+            await smtp.login(username, password)
+            await smtp.send_message(message, recipients=recipients)
     def connect_and_send(self, message, hostname: str, port: int, username: str, password: str, use_tls: bool = True, use_ssl: bool = False, timeout: int = 30, recipients: list = None):
         raise NotImplementedError("AioSMTPLibClient does not support synchronous sending. Use SMTPLibClient instead.")
 
@@ -190,9 +186,6 @@ class SMTPLibClient:
     def connect_and_send(self, message, hostname: str, port: int, username: str, password: str, use_tls: bool = True, use_ssl: bool = False, timeout: int = 30, recipients: list = None):
         if use_ssl:
             with smtplib.SMTP_SSL(hostname, port, timeout=timeout) as server:
-                if use_tls:
-                    # SMTP_SSL already uses SSL, no starttls needed
-                    pass
                 server.login(username, password)
                 text = message.as_string()
                 if recipients:
@@ -343,7 +336,18 @@ def _process_attachment(file_path: str, max_size: int, ignore_errors: bool) -> O
         safe_filename = filename.replace('"', '\\"')
         part.add_header('Content-Disposition', f'attachment; filename="{safe_filename}"')
         return part
-    except (FileNotFoundError, SizeLimitError, Exception) as e:
+    except SizeLimitError:
+        if ignore_errors:
+            logger.warning(f"Ignoring attachment size-limit error for {file_path}")
+            return None
+        # 让超限异常独立传播，供调用方区分"超限"与其他附件错误
+        raise
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        if ignore_errors:
+            logger.warning(f"Ignoring attachment error for {file_path}: {str(e)}")
+            return None
+        raise AttachmentError(f"Error processing attachment {file_path}: {str(e)}") from e
+    except Exception as e:
         if ignore_errors:
             logger.warning(f"Ignoring attachment error for {file_path}: {str(e)}")
             return None
@@ -363,25 +367,23 @@ def _add_attachments_to_message(msg: MIMEMultipart, attachments: List[str], max_
 
 def _collect_recipients(to_emails: Union[str, List[str]], cc: List[str] = None, bcc: List[str] = None) -> List[str]:
     all_recipients = []
-    if isinstance(to_emails, str):
-        parsed = parseaddr(to_emails)[1]
-        if parsed:
+    seen = set()
+    def _add(email: str) -> None:
+        parsed = parseaddr(email)[1] if email else ""
+        if parsed and parsed not in seen:
+            seen.add(parsed)
             all_recipients.append(parsed)
+    if isinstance(to_emails, str):
+        _add(to_emails)
     else:
         for e in to_emails:
-            parsed = parseaddr(e)[1]
-            if parsed:
-                all_recipients.append(parsed)
+            _add(e)
     if cc:
         for e in cc:
-            parsed = parseaddr(e)[1]
-            if parsed:
-                all_recipients.append(parsed)
+            _add(e)
     if bcc:
         for e in bcc:
-            parsed = parseaddr(e)[1]
-            if parsed:
-                all_recipients.append(parsed)
+            _add(e)
     return all_recipients
 
 def validate_email_address(email: str) -> bool:
@@ -458,6 +460,9 @@ class CreMail:
         self.use_ssl = use_ssl
         self.daily_send_limit = 1000
         self.rate_limit_delay = 1.0
+        self._sent_today = 0
+        self._sent_date = None
+        self._last_sent_time = None
         self.from_display_name = from_display_name
         self.smtp_client = smtp_client or SMTPLibClient()
         if log_file:
@@ -470,6 +475,22 @@ class CreMail:
                 file_handler = logging.FileHandler(log_file)
                 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
                 logger.addHandler(file_handler)
+
+    def _throttle(self) -> None:
+        """简单限流：单日发送上限 + 同一实例两次发送之间的最小间隔（rate_limit_delay）。"""
+        today = time.strftime('%Y-%m-%d')
+        if self._sent_date != today:
+            self._sent_date = today
+            self._sent_today = 0
+        if self._sent_today >= self.daily_send_limit:
+            raise RateLimitError(f"Daily send limit ({self.daily_send_limit}) reached")
+        now = time.time()
+        if self._last_sent_time is not None and self.rate_limit_delay > 0:
+            elapsed = now - self._last_sent_time
+            if elapsed < self.rate_limit_delay:
+                time.sleep(self.rate_limit_delay - elapsed)
+        self._last_sent_time = time.time()
+        self._sent_today += 1
 
     def validate_content(self, content: Union[str, dict]) -> None:
         if content is None:
@@ -529,19 +550,22 @@ class CreMail:
         if bcc_recipients:
             validate_email_list(bcc_recipients)
         all_recipients = _collect_recipients(recipient_email, cc_recipients, bcc_recipients)
+        msgid = make_msgid()
+        # 消息构建与附件处理与网络无关，只做一次；确定性错误在此直接抛出，不进入重试
+        msg = _build_mime_message(
+            self.email, recipient_email, subject,
+            self.from_display_name, cc_recipients, bcc_recipients, reply_to, priority
+        )
+        msg['Message-ID'] = msgid
+        _add_content_to_message(msg, content, content_type)
+        attach_errors = _add_attachments_to_message(msg, attachments or [], self.max_attachment_size, ignore_attachment_errors)
+        if attach_errors and not ignore_attachment_errors:
+            raise AttachmentError(f"Attachment errors: {', '.join(attach_errors)}")
+        if attach_errors and ignore_attachment_errors:
+            logger.warning(f"Ignoring attachment errors: {', '.join(attach_errors)}")
         start_time = time.time()
         for attempt in range(max_retries + 1):
             try:
-                msg = _build_mime_message(
-                    self.email, recipient_email, subject,
-                    self.from_display_name, cc_recipients, bcc_recipients, reply_to, priority
-                )
-                _add_content_to_message(msg, content, content_type)
-                attach_errors = _add_attachments_to_message(msg, attachments or [], self.max_attachment_size, ignore_attachment_errors)
-                if attach_errors and not ignore_attachment_errors:
-                    raise AttachmentError(f"Attachment errors: {', '.join(attach_errors)}")
-                if attach_errors and ignore_attachment_errors:
-                    logger.warning(f"Ignoring attachment errors: {', '.join(attach_errors)}")
                 await self.smtp_client.async_send_message(
                     msg,
                     hostname=self.smtp_server,
@@ -549,19 +573,41 @@ class CreMail:
                     username=self.email,
                     password=self.password,
                     start_tls=self.use_tls and not self.use_ssl,
+                    use_ssl=self.use_ssl,
                     timeout=self.timeout,
                     recipients=all_recipients
                 )
                 logger.info(f"Email sent successfully to {recipient_email}")
-                return SendResult(success=True, message_id=str(hash(str(msg))), accepted_recipients=all_recipients)
+                return SendResult(success=True, message_id=msgid, accepted_recipients=all_recipients)
             except Exception as e:
+                # 区分"连接被服务端关闭"：服务器可能已受理，返回状态未知，不盲目重试（避免重复投递）
+                disconnect_types = []
+                sync_dc = getattr(smtplib, 'SMTPServerDisconnected', None)
+                if sync_dc is not None:
+                    disconnect_types.append(sync_dc)
+                if _HAS_AIOSMTPLIB:
+                    try:
+                        from aiosmtplib.errors import SMTPServerDisconnected as aio_dc
+                        disconnect_types.append(aio_dc)
+                    except Exception:
+                        pass
+                if any(isinstance(e, dt) for dt in disconnect_types):
+                    logger.exception(f"SMTP connection closed during async send (delivery status unknown): {str(e)}")
+                    return SendResult(
+                        success=False,
+                        error_detail=(
+                            f"SMTP connection closed during send; the email MAY already be delivered. "
+                            f"Message-ID={msgid}. Do NOT blindly retry the same message."
+                        ),
+                        exception=e,
+                    )
                 logger.exception(f"Error sending email on attempt {attempt + 1}: {str(e)}")
                 if attempt == max_retries:
                     return SendResult(success=False, error_detail=str(e), exception=e)
                 if total_timeout is not None and (time.time() - start_time) >= total_timeout:
                     logger.warning("Total timeout exceeded")
                     return SendResult(success=False, error_detail="Total timeout exceeded")
-                wait_time = min(2 ** attempt, 60) + random.uniform(0, 0.1 * min(2 ** attempt, 60))
+                wait_time = min(2 ** attempt, 60) + random.uniform(0.5, 2.0)
                 await asyncio.sleep(wait_time)
         return SendResult(success=False, error_detail="Max retries exceeded")
 
@@ -580,6 +626,8 @@ class CreMail:
         priority: Literal["high", "normal", "low"] = "normal",
         total_timeout: float = None
     ) -> SendResult:
+        # 约定：参数校验错误（非法收件人/空内容）与确定性资源错误（附件超限等）直接抛异常；
+        #       发送/网络运行错误返回 SendResult(success=False)
         self.validate_content(content)
         validate_email_list(recipient_email)
         if cc_recipients:
@@ -587,19 +635,24 @@ class CreMail:
         if bcc_recipients:
             validate_email_list(bcc_recipients)
         all_recipients = _collect_recipients(recipient_email, cc_recipients, bcc_recipients)
+        self._throttle()
+        # 幂等标识：同一封邮件（含重试）使用同一 Message-ID，便于服务端/用户去重与追踪
+        msgid = make_msgid()
+        # 消息构建与附件处理与网络无关，只做一次；确定性错误（超限/缺失）在此直接抛出，不进入重试
+        msg = _build_mime_message(
+            self.email, recipient_email, subject,
+            self.from_display_name, cc_recipients, bcc_recipients, reply_to, priority
+        )
+        msg['Message-ID'] = msgid
+        _add_content_to_message(msg, content, content_type)
+        attach_errors = _add_attachments_to_message(msg, attachments or [], self.max_attachment_size, ignore_attachment_errors)
+        if attach_errors and not ignore_attachment_errors:
+            raise AttachmentError(f"Attachment errors: {', '.join(attach_errors)}")
+        if attach_errors and ignore_attachment_errors:
+            logger.warning(f"Ignoring attachment errors: {', '.join(attach_errors)}")
         start_time = time.time()
         for attempt in range(max_retries + 1):
             try:
-                msg = _build_mime_message(
-                    self.email, recipient_email, subject,
-                    self.from_display_name, cc_recipients, bcc_recipients, reply_to, priority
-                )
-                _add_content_to_message(msg, content, content_type)
-                attach_errors = _add_attachments_to_message(msg, attachments or [], self.max_attachment_size, ignore_attachment_errors)
-                if attach_errors and not ignore_attachment_errors:
-                    raise AttachmentError(f"Attachment errors: {', '.join(attach_errors)}")
-                if attach_errors and ignore_attachment_errors:
-                    logger.warning(f"Ignoring attachment errors: {', '.join(attach_errors)}")
                 result = self.smtp_client.connect_and_send(
                     msg,
                     hostname=self.smtp_server,
@@ -612,13 +665,25 @@ class CreMail:
                     recipients=all_recipients
                 )
                 logger.info(f"Email sent successfully to {recipient_email}")
-                return SendResult(success=True, message_id=str(hash(str(msg))), accepted_recipients=list(result.keys()) if result else all_recipients)
+                return SendResult(success=True, message_id=msgid, accepted_recipients=list(result.keys()) if result else all_recipients)
             except smtplib.SMTPAuthenticationError as e:
                 logger.exception(f"SMTP authentication error: {str(e)}")
                 return SendResult(success=False, error_detail=f"SMTP authentication error: {str(e)}", exception=e)
             except smtplib.SMTPRecipientsRefused as e:
                 logger.exception(f"Recipients refused: {str(e)}")
                 return SendResult(success=False, error_detail=f"Recipients refused: {str(e)}", exception=e)
+            except smtplib.SMTPServerDisconnected as e:
+                # 关键可靠性：服务器可能在"已受理邮件后"才断开（如 QQ 短时频控）。
+                # 连接期/传输期被断无法可靠判定是否已投递，保守处理：不再盲目重试，避免重复发送。
+                logger.exception(f"SMTP connection closed during send (delivery status unknown): {str(e)}")
+                return SendResult(
+                    success=False,
+                    error_detail=(
+                        f"SMTP connection closed during send; the email MAY already be delivered. "
+                        f"Message-ID={msgid}. Do NOT blindly retry the same message."
+                    ),
+                    exception=e,
+                )
             except Exception as e:
                 logger.exception(f"Error sending email on attempt {attempt + 1}: {str(e)}")
                 if attempt == max_retries:
@@ -626,7 +691,7 @@ class CreMail:
                 if total_timeout is not None and (time.time() - start_time) >= total_timeout:
                     logger.warning("Total timeout exceeded")
                     return SendResult(success=False, error_detail="Total timeout exceeded")
-                wait_time = min(2 ** attempt, 60) + random.uniform(0, 0.1 * min(2 ** attempt, 60))
+                wait_time = min(2 ** attempt, 60) + random.uniform(0.5, 2.0)
                 time.sleep(wait_time)
         return SendResult(success=False, error_detail="Max retries exceeded")
 
@@ -643,14 +708,26 @@ def send_email_with_config(
     bcc_recipients: List[str] = None,
     reply_to: str = None,
     priority: Literal["high", "normal", "low"] = "normal",
-    password_callback = None
+    password_callback = None,
+    total_timeout: float = None,
+    timeout: int = 30,
+    max_attachment_size: int = 10 * 1024 * 1024,
+    use_tls: bool = True,
+    use_ssl: bool = False
 ) -> SendResult:
     try:
-        email_sender = CreMail(config_file=config_file, password_callback=password_callback)
+        email_sender = CreMail(
+            config_file=config_file,
+            password_callback=password_callback,
+            timeout=timeout,
+            max_attachment_size=max_attachment_size,
+            use_tls=use_tls,
+            use_ssl=use_ssl,
+        )
         return email_sender.send_email(
             recipient_email, subject, content, content_type,
             attachments, ignore_attachment_errors, max_retries,
-            cc_recipients, bcc_recipients, reply_to, priority
+            cc_recipients, bcc_recipients, reply_to, priority, total_timeout
         )
     except Exception as e:
         logger.error(f"Error sending email: {str(e)}")

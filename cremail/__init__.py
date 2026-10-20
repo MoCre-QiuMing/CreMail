@@ -40,10 +40,13 @@ from .CreMail import (
     generate_verification_code_unified,
     get_default_sender,
     send_email_with_default_sender,
-    get_password_securely
+    get_password_securely,
+    validate_email_address,
+    validate_email_list,
+    format_email_with_name
 )
 
-__version__ = "2.1.1"
+__version__ = "2.2.0"
 __author__ = "QiuMing"
 __license__ = "MIT"
 __all__ = [
@@ -77,5 +80,8 @@ __all__ = [
     'generate_verification_code_unified',
     'get_default_sender',
     'send_email_with_default_sender',
-    'get_password_securely'
+    'get_password_securely',
+    'validate_email_address',
+    'validate_email_list',
+    'format_email_with_name'
 ]

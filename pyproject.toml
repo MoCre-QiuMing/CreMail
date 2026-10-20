@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "CreMail"
-version = "2.1.1"
+version = "2.2.0"
 authors = [
     {name = "QiuMing", email = "mocre_rx@foxmail.com"},
 ]

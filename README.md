@@ -20,6 +20,7 @@
 
 ## 📋 Table of Contents
 
+- [Technical Selection & Wrapping Cost](#-technical-selection--wrapping-cost)
 - [Features](#-features)
 - [Comparison with Other Email Modules](#-comparison-with-other-email-modules)
 - [Installation](#-installation)
@@ -28,6 +29,20 @@
 - [API Reference](#-api-reference)
 - [Examples](#-examples)
 - [License](#-license)
+
+## ⚖️ Technical Selection & Wrapping Cost
+
+An honest note on how CreMail relates to the native `smtplib`, and what the wrapper costs:
+
+**Dependencies:** Synchronous sending is fully zero-dependency (`smtplib` is part of the standard library). Async sending and template rendering need `aiosmtplib` and `jinja2`, but they are installed automatically by:
+
+```bash
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git
+```
+
+No manual reinstall needed. Only when you choose to copy the `cremail.py` source directly into your project do you need to watch for these two dependencies.
+
+**Low-level control:** If you need to execute extreme low-level SMTP extension commands or fine-grained socket-layer operations, native `smtplib` is more flexible. But for ~99% of business scenarios, the wrapping overhead of CreMail is negligible.
 
 ## ✨ Features
 
@@ -46,6 +61,11 @@
 - **Email Validation**: Validates email formats before sending, prevents invalid addresses
 - **Priority Support**: Supports email priority settings
 - **Global Instance**: Provides default instance, reducing repetitive configuration
+- **Idempotent Message-ID**: Each email (including retries) reuses a real `Message-ID` via `make_msgid()`, enabling deduplication and tracking
+- **Duplicate-Send Protection**: When the server closes the connection mid-send (the email may already be delivered, e.g. QQ short-term frequency control), sending is NOT blindly retried — a "delivery status unknown" result is returned instead
+- **Built-in Rate Limiting**: `daily_send_limit` and `rate_limit_delay` are actually enforced since 2.2.0
+- **Utility Functions Exported**: `validate_email_address`, `validate_email_list`, `format_email_with_name` are exported at package level (2.2.0)
+- **Async SSL Support**: async sending supports `use_ssl` (SMTP over SSL, port 465) in addition to STARTTLS (2.2.0)
 
 ## 📊 Comparison with Other Email Modules
 
@@ -347,6 +367,8 @@ except Exception as e:
     print(f"Other error: {e}")
 ```
 
+> **Error semantics (since 2.2.0):** Deterministic errors — invalid recipient (`ValueError`), empty/invalid content (`ContentValidationError`), attachment size-limit (`SizeLimitError`), and other validation/build errors — are **raised as exceptions** and are never retried. Network/send errors (authentication failure, server disconnect, timeout) instead return a `SendResult(success=False)`. Wrap `send_email` in try/except for validation errors, and check `result.success` for send errors.
+
 ### Method 9: Using Retry Mechanism
 
 ```python
@@ -362,6 +384,8 @@ result = sender.send_email(
     max_retries=3
 )
 ```
+
+> **Note (since 2.2.0):** Retries reuse the same `Message-ID`. If the server closes the connection during send (`SMTPServerDisconnected`), the email may already be delivered, so CreMail does NOT auto-retry and returns a `SendResult` noting "may already be delivered" — do not blindly resend the same message.
 
 ### Method 10: Using Asynchronous Sending
 
@@ -466,9 +490,9 @@ Send custom email with specified content.
 
 ### Regular Functions
 
-#### `send_email_with_config(recipient_email, subject, content, config_file="email_config.json", content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", password_callback=None) -> SendResult`
+#### `send_email_with_config(recipient_email, subject, content, config_file="email_config.json", content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", password_callback=None, total_timeout: float = None, timeout: int = 30, max_attachment_size: int = 10485760, use_tls: bool = True, use_ssl: bool = False) -> SendResult`
 
-Regular function to send email with configuration file.
+Regular function to send email with configuration file. Since 2.2.0 it also accepts `total_timeout`, `timeout`, `max_attachment_size`, `use_tls` and `use_ssl`.
 
 #### `async_send_email(recipient_email, subject, content, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, max_attachment_size: int = 10485760, total_timeout: float = None, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", from_display_name: str = None) -> SendResult`
 
@@ -503,6 +527,18 @@ Unified verification code generation function, select verification code type via
 **Returns:**
 - `str`: Generated verification code string
 
+#### `validate_email_address(email: str) -> bool`
+
+Validate whether an email address is valid. Exported at package level since 2.2.0.
+
+#### `validate_email_list(emails: List[str]) -> List[str]`
+
+Validate a list of email addresses; raises `ValueError` if any address is invalid. Exported at package level since 2.2.0.
+
+#### `format_email_with_name(email: str, display_name: str) -> str`
+
+Format an email address with a display name, e.g. `"Name <email>"`. Exported at package level since 2.2.0.
+
 ### Custom Exception Classes
 
 The module defines a detailed exception hierarchy:
@@ -512,8 +548,10 @@ The module defines a detailed exception hierarchy:
 - `SMTPConnectionError`: SMTP connection error
 - `AttachmentError`: Attachment handling error
 - `SizeLimitError`: Attachment size limit error
-- `RateLimitError`: Send rate limit error
+- `RateLimitError`: Send rate limit exceeded (enforced since 2.2.0)
 - `ContentValidationError`: Content validation error
+
+> Since 2.2.0: `SizeLimitError` is raised directly (not wrapped into `AttachmentError`), so callers can distinguish "attachment too large" from other attachment errors (e.g. missing file).
 
 ### SendResult Class
 
@@ -542,11 +580,15 @@ Environment variable names:
 
 ### Retry Mechanism
 
-The send_email method supports the max_retries parameter with a default of 2 retries, using exponential backoff algorithm with random jitter.
+The send_email method supports the max_retries parameter with a default of 2 retries, using exponential backoff with random jitter and total timeout control.
+
+Since 2.2.0: retries reuse the same `Message-ID` (idempotent). Message building and attachment handling are performed once outside the retry loop, so deterministic errors are raised immediately and never retried. If the server closes the connection during send (`SMTPServerDisconnected`), the email may already be delivered and is NOT blindly retried — the returned `SendResult` notes "may already be delivered".
 
 ### Asynchronous Support
 
 Provides async_send_email asynchronous function and batch_send batch sending feature, requires aiosmtplib library.
+
+Since 2.2.0: async sending supports `use_ssl` (SMTP over SSL, port 465) in addition to STARTTLS.
 
 ### Template Rendering
 

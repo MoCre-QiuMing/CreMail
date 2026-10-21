@@ -2,7 +2,7 @@
 
 ## 2.2.1 (2026-10-20)
 
-本版为补丁版：修复异步/批量路径的硬性 BUG，并修正宣传与文档不符之处。
+本版为针对第三方 AI 代码审查（2.2.0 实测）的补丁版：修复异步/批量路径的硬性 BUG，并修正宣传与文档不符之处。
 
 ### 硬性 BUG 修复
 
@@ -25,7 +25,7 @@
 ### 打包与文档修正
 
 - **真正同步零依赖**：`aiosmtplib`、`jinja2` 从 `install_requires`/`dependencies` 移除，仅保留在
-  `extras_require`（async/template/all），`pip install CreMail` 不再强装异步/模板依赖。
+  `extras_require`（async/template/all），安装 CreMail 不再强装异步/模板依赖。
 - **Python 版本声明修正**：`requires-python`/`python_requires` 由 `>=3.6` 修正为 `>=3.8`
   （代码使用 `typing.TypedDict`/`Literal`，3.6/3.7 无法导入），classifiers 同步移除 3.6/3.7。
 - **CHANGELOG 测试数修正**：2.2.0 段原"36/36"与仓库实际不符，已如实标注。

@@ -34,11 +34,12 @@
 
 关于 CreMail 与原生 **smtplib** 的关系，以及封装带来的代价，做一个客观说明：
 
-**依赖问题**：同步发信完全零依赖（**smtplib** 是标准库），`pip install CreMail` 不额外拉取任何依赖。异步发送与模板渲染为可选能力，需要时通过 extras 安装：
+**依赖问题**：同步发信完全零依赖（**smtplib** 是标准库），安装 CreMail 不会额外拉取任何依赖。异步发送与模板渲染为可选能力，需要时通过 extras 安装：
 
 ```bash
-pip install git+https://github.com/MoCre-QiuMing/CreMail.git[async]    # 异步发送
-pip install git+https://github.com/MoCre-QiuMing/CreMail.git[all]      # 异步 + 模板
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git              # 同步零依赖
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git[async]       # 异步发送
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git[all]         # 异步 + 模板
 ```
 
 只有当你选择直接复制 **cremail.py** 源码扔进项目时，才需要自行安装 `aiosmtplib` / `jinja2`。

@@ -34,11 +34,12 @@
 
 An honest note on how CreMail relates to the native **smtplib**, and what the wrapper costs:
 
-**Dependencies:** Synchronous sending is fully zero-dependency (**smtplib** is part of the standard library) — `pip install CreMail` pulls in no extra packages. Async sending and template rendering are optional: install them via extras when needed:
+**Dependencies:** Synchronous sending is fully zero-dependency (**smtplib** is part of the standard library) — installing CreMail pulls in no extra packages. Async sending and template rendering are optional: install them via extras when needed:
 
 ```bash
-pip install git+https://github.com/MoCre-QiuMing/CreMail.git[async]    # async sending
-pip install git+https://github.com/MoCre-QiuMing/CreMail.git[all]      # async + template
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git              # sync: zero-dependency
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git[async]       # async sending
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git[all]         # async + template
 ```
 
 Only when you copy the **cremail.py** source directly into your project do you need to install `aiosmtplib` / `jinja2` yourself.

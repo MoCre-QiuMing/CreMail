@@ -34,15 +34,15 @@
 
 An honest note on how CreMail relates to the native **smtplib**, and what the wrapper costs:
 
-**Dependencies:** Synchronous sending is fully zero-dependency (**smtplib** is part of the standard library) — installing CreMail pulls in no extra packages. Async sending and template rendering are optional: install them via extras when needed:
+**Dependencies:** Synchronous sending is fully zero-dependency (**smtplib** is part of the standard library). Async sending and template rendering need **aiosmtplib** and **jinja2**, installed on demand via extras:
 
 ```bash
 pip install git+https://github.com/MoCre-QiuMing/CreMail.git              # sync: zero-dependency
-pip install git+https://github.com/MoCre-QiuMing/CreMail.git[async]       # async sending
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git[async]       # async only
 pip install git+https://github.com/MoCre-QiuMing/CreMail.git[all]         # async + template
 ```
 
-Only when you copy the **cremail.py** source directly into your project do you need to install `aiosmtplib` / `jinja2` yourself.
+Only when you choose to copy the **cremail.py** source directly into your project do you need to watch for these two dependencies.
 
 **Low-level control:** If you need to execute extreme low-level SMTP extension commands or fine-grained socket-layer operations, native **smtplib** is more flexible. But for ~99% of business scenarios, the wrapping overhead of CreMail is negligible.
 
@@ -65,24 +65,32 @@ Only when you copy the **cremail.py** source directly into your project do you n
 - **Global Instance**: Provides default instance, reducing repetitive configuration
 - **Idempotent Message-ID**: Each email (including retries) reuses a real `Message-ID` via `make_msgid()`, enabling deduplication and tracking
 - **Duplicate-Send Protection**: When the server closes the connection mid-send (the email may already be delivered, e.g. QQ short-term frequency control), sending is NOT blindly retried — a "delivery status unknown" result is returned instead
-- **Built-in Rate Limiting**: `daily_send_limit` and `rate_limit_delay` are actually enforced since 2.2.1
-- **Utility Functions Exported**: `validate_email_address`, `validate_email_list`, `format_email_with_name` are exported at package level (2.2.1)
-- **Async SSL Support**: async sending supports `use_ssl` (SMTP over SSL, port 465) in addition to STARTTLS (2.2.1)
+- **Built-in Rate Limiting**: `daily_send_limit` and `rate_limit_delay` are actually enforced since 2.2.0
+- **Utility Functions Exported**: `validate_email_address`, `validate_email_list`, `format_email_with_name` are exported at package level (2.2.0)
+- **Async SSL Support**: async sending supports `use_ssl` (SMTP over SSL, port 465) in addition to STARTTLS (2.2.0)
+- **Secure Credential Management**: password/authorization code can be read from the OS keyring (`get_password_from_keyring` / `set_password_in_keyring` / `delete_password_from_keyring`), and sensitive values are redacted from logs (2.3.0)
+- **Tiered Retry Strategy**: deterministic errors never retry; server disconnect (delivery status unknown) never blindly retries; transient network errors retry with configurable exponential backoff (`retry_delay_base` / `retry_delay_max` / `retry_jitter`) (2.3.0)
+- **Connection Reuse (keep-alive)**: reuse the SMTP connection across sends with `keep_alive=True` to reduce handshake overhead; explicit `close()` / `aclose()` (2.3.0)
+- **Async/Sync API Parity**: `async_send_email` now accepts `timeout`, `use_tls`, `use_ssl`, `keep_alive` (2.3.0)
+- **Delivery Semantics & Bounce Detection**: `success=True` means the server *accepted* the mail, not that it was delivered; `is_delivery_status_notification()` detects NDR/DSN bounces (2.3.0)
+- **OAuth2 Authentication**: send with an OAuth2 access token via the `oauth2_token` parameter using the XOAUTH2 SASL mechanism — no password/authorization code needed; supported in both sync and async clients (2.3.0)
 
 ## 📊 Comparison with Other Email Modules
 
 | Feature | CreMail | smtplib | yagmail | aiosmtplib |
 |---------|---------|---------|---------|------------|
-| Configuration Management | ✅ Advanced | ❌ Basic | ✅ Medium | ❌ None |
-| Async Support | ✅ Complete | ❌ Sync Only | ❌ Sync Only | ✅ Complete |
-| Batch Sending | ✅ High-Performance | ❌ None | ❌ None | ❌ None |
-| Smart Retry | ✅ Advanced | ❌ None | ❌ Basic | ❌ None |
-| Concurrency Control | ✅ Advanced | ❌ None | ❌ None | ❌ None |
-| Password Security | ✅ Advanced | ❌ Basic | ❌ Basic | ❌ Basic |
-| Verification Code Gen | ✅ Built-in | ❌ None | ❌ None | ❌ None |
-| Modular Design | ✅ Advanced | ❌ Low | ❌ Medium | ❌ Low |
-| Display Names | ✅ Supported | ✅ Supported | ✅ Supported | ❌ None |
-| Email Validation | ✅ Pre-send Validation | ❌ Send-time validation | ❌ Send-time validation | ❌ Send-time validation |
+| Async Support | ✅ Built-in | ❌ Sync only | ❌ Sync only | ✅ Built-in |
+| Batch Sending | ✅ Built-in | ❌ 需自行实现 | ❌ 需自行实现 | ❌ 需自行实现 |
+| Retry Strategy | ✅ Built-in (3-tier) | ❌ 需自行实现 | ❌ 需自行实现 | ❌ 需自行实现 |
+| Concurrency Control | ✅ Built-in | ❌ 需自行实现 | ❌ 需自行实现 | ❌ 需自行实现 |
+| Config Management | ✅ Built-in (multi-source) | ❌ 需自行实现 | ✅ 简化 API | ❌ 需自行实现 |
+| Password Security | ✅ 回调 / keyring / 脱敏 | ❌ 需自行处理 | ✅ 简化 | ❌ 需自行处理 |
+| Verification Code Gen | ✅ Built-in | ❌ 无 | ❌ 无 | ❌ 无 |
+| Modular Design | ✅ Built-in | ❌ 无 | ❌ 无 | ❌ 无 |
+| Display Names | ✅（email 库 formataddr） | ✅（email 库） | ✅（email 库） | ✅（email 库） |
+| Email Validation | ✅ 内置预校验 | ❌ 无内置 | ❌ 无内置 | ❌ 无内置 |
+
+> 客观口径说明："内置"表示开箱即用；"需自行实现"表示需要自行编写代码，而非库缺陷。显示名由标准库 `email` 的 `formataddr()` 提供，四种方案均可用；Email Validation 栏中 smtplib/yagmail/aiosmtplib 均不提供内置地址校验。
 
 CreMail excels in functionality, security, and usability compared to other modules, especially suitable for scenarios requiring high performance and security.
 
@@ -369,7 +377,7 @@ except Exception as e:
     print(f"Other error: {e}")
 ```
 
-> **Error semantics (since 2.2.1):** Deterministic errors — invalid recipient (`ValueError`), empty/invalid content (`ContentValidationError`), attachment size-limit (`SizeLimitError`), and other validation/build errors — are **raised as exceptions** and are never retried. Network/send errors (authentication failure, server disconnect, timeout) instead return a `SendResult(success=False)`. Wrap `send_email` in try/except for validation errors, and check `result.success` for send errors.
+> **Error semantics (since 2.2.0):** Deterministic errors — invalid recipient (`ValueError`), empty/invalid content (`ContentValidationError`), attachment size-limit (`SizeLimitError`), and other validation/build errors — are **raised as exceptions** and are never retried. Network/send errors (authentication failure, server disconnect, timeout) instead return a `SendResult(success=False)`. Wrap `send_email` in try/except for validation errors, and check `result.success` for send errors.
 
 ### Method 9: Using Retry Mechanism
 
@@ -387,7 +395,7 @@ result = sender.send_email(
 )
 ```
 
-> **Note (since 2.2.1):** Retries reuse the same `Message-ID`. If the server closes the connection during send (`SMTPServerDisconnected`), the email may already be delivered, so CreMail does NOT auto-retry and returns a `SendResult` noting "may already be delivered" — do not blindly resend the same message.
+> **Note (since 2.2.0):** Retries reuse the same `Message-ID`. If the server closes the connection during send (`SMTPServerDisconnected`), the email may already be delivered, so CreMail does NOT auto-retry and returns a `SendResult` noting "may already be delivered" — do not blindly resend the same message.
 
 ### Method 10: Using Asynchronous Sending
 
@@ -447,7 +455,7 @@ asyncio.run(batch_send_example())
 
 ### Class: CreMail
 
-#### `__init__(self, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, config_provider=None, max_attachment_size=10485760, timeout=30, use_tls=True, use_ssl=False, provider_priority=False, from_display_name=None, smtp_client=None, password_callback=None, log_file=None)`
+#### `__init__(self, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, config_provider=None, max_attachment_size=10485760, timeout=30, use_tls=True, use_ssl=False, provider_priority=False, from_display_name=None, smtp_client=None, password_callback=None, log_file=None, keep_alive=False, password_from_keyring=False, oauth2_token=None, retry_delay_base=2.0, retry_delay_max=60.0, retry_jitter=1.0)`
 
 Initialize email sender.
 
@@ -468,6 +476,12 @@ Initialize email sender.
 - `smtp_client` (SMTPClient, optional): SMTP client implementation
 - `password_callback` (callable, optional): Password retrieval callback function
 - `log_file` (str, optional): Log file path for writing logs to file. Can be absolute path or relative path (relative to current working directory). Default: None, logs to console only
+- `keep_alive` (bool): Reuse the SMTP connection across sends to reduce handshake overhead; release it explicitly with `close()` (sync) / `aclose()` (async) (2.3.0)
+- `password_from_keyring` (bool): Read the password/authorization code from the OS keyring (service `CreMail`) when not provided elsewhere (2.3.0)
+- `oauth2_token` (str, optional): OAuth2 access token. When provided, XOAUTH2 authentication is used and no password/authorization code is required; the token is redacted from logs automatically (2.3.0)
+- `retry_delay_base` (float): Base delay (seconds) of the exponential backoff (default: 2.0) (2.3.0)
+- `retry_delay_max` (float): Maximum per-attempt backoff delay in seconds (default: 60.0) (2.3.0)
+- `retry_jitter` (float): Random jitter range multiplier for the backoff delay (default: 1.0) (2.3.0)
 
 #### `send_email(self, recipient_email: Union[str, List[str]], subject: str, content: Union[str, dict], content_type: str = "html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", total_timeout: float = None) -> SendResult`
 
@@ -492,11 +506,13 @@ Send custom email with specified content.
 
 ### Regular Functions
 
-#### `send_email_with_config(recipient_email, subject, content, config_file="email_config.json", content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", password_callback=None, total_timeout: float = None, timeout: int = 30, max_attachment_size: int = 10485760, use_tls: bool = True, use_ssl: bool = False) -> SendResult`
+#### `send_email_with_config(recipient_email, subject, content, config_file="email_config.json", content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", password_callback=None, total_timeout: float = None, timeout: int = 30, max_attachment_size: int = 10485760, use_tls: bool = True, use_ssl: bool = False, retry_delay_base: float = 2.0, retry_delay_max: float = 60.0, retry_jitter: float = 1.0, keep_alive: bool = False, password_from_keyring: bool = False, oauth2_token: str = None) -> SendResult`
 
-Regular function to send email with configuration file. Since 2.2.1 it also accepts `total_timeout`, `timeout`, `max_attachment_size`, `use_tls` and `use_ssl`.
+Regular function to send email with configuration file. Since 2.2.0 it also accepts `total_timeout`, `timeout`, `max_attachment_size`, `use_tls` and `use_ssl`. Since 2.3.0 it additionally accepts `retry_delay_base`, `retry_delay_max`, `retry_jitter`, `keep_alive`, `password_from_keyring` and `oauth2_token`.
 
-#### `async_send_email(recipient_email, subject, content, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, max_attachment_size: int = 10485760, total_timeout: float = None, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", from_display_name: str = None, use_tls: bool = True, use_ssl: bool = False) -> SendResult`
+#### `async_send_email(recipient_email, subject, content, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, max_attachment_size: int = 10485760, total_timeout: float = None, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", from_display_name: str = None, timeout: int = 30, use_tls: bool = True, use_ssl: bool = False, keep_alive: bool = False, oauth2_token: str = None) -> SendResult`
+
+Since 2.3.0, `async_send_email` also accepts `timeout`, `use_tls`, `use_ssl` and `keep_alive`, aligning its API with the synchronous path.
 
 Asynchronous function to send email (requires aiosmtplib library).
 
@@ -531,15 +547,51 @@ Unified verification code generation function, select verification code type via
 
 #### `validate_email_address(email: str) -> bool`
 
-Validate whether an email address is valid. Exported at package level since 2.2.1.
+Validate whether an email address is valid. Exported at package level since 2.2.0.
 
 #### `validate_email_list(emails: List[str]) -> List[str]`
 
-Validate a list of email addresses; raises `ValueError` if any address is invalid. Exported at package level since 2.2.1.
+Validate a list of email addresses; raises `ValueError` if any address is invalid. Exported at package level since 2.2.0.
 
 #### `format_email_with_name(email: str, display_name: str) -> str`
 
-Format an email address with a display name, e.g. `"Name <email>"`. Exported at package level since 2.2.1.
+Format an email address with a display name, e.g. `"Name <email>"`. Exported at package level since 2.2.0.
+
+> **Dependency note**: `keyring` is an optional dependency. If it is not installed, reading (`get_password_from_keyring`) safely returns `None`, but writing/deleting (`set_password_in_keyring`, `delete_password_from_keyring`) raise `ImportError`. To use the keyring credential store, install it first: `pip install keyring`.
+
+#### `get_password_from_keyring(email: str, service: str = "CreMail") -> Optional[str]`
+
+Read the password/authorization code for `email` from the OS keyring. Returns `None` if `keyring` is not installed or no entry is found. (2.3.0)
+
+#### `set_password_in_keyring(email: str, password: str, service: str = "CreMail") -> bool`
+
+Securely store the password/authorization code in the OS keyring. Raises `ImportError` if `keyring` is not installed, `ConfigError` on failure. (2.3.0)
+
+#### `delete_password_from_keyring(email: str, service: str = "CreMail") -> bool`
+
+Delete the password entry for `email` from the keyring. Returns `False` if the entry does not exist or `keyring` is unavailable. (2.3.0)
+
+#### `is_delivery_status_notification(message_text: str) -> bool`
+
+Detect whether a message is a bounce / delivery status notification (NDR/DSN), by checking for `MAILER-DAEMON`/`postmaster` senders, `multipart/report`, `message/delivery-status`, `reporting-mta`, `final-recipient`, `action: failed`, `status: 4.`/`5.`, and common bounce keywords. Useful for correlating failed deliveries with the original `Message-ID`. (2.3.0)
+
+#### `build_xoauth2_response(username: str, access_token: str) -> str`
+
+Construct the XOAUTH2 SASL authentication initial response (`user=<email>\x01auth=Bearer <token>\x01\x01`, not base64-encoded). Use it with the `oauth2_token` parameter for Gmail / Outlook / any SMTP service supporting XOAUTH2. Exported at package top level. (2.3.0)
+
+Usage example:
+
+```python
+from cremail import CreMail
+
+sender = CreMail(
+    smtp_server="smtp.gmail.com", smtp_port=587,
+    email="you@gmail.com",
+    oauth2_token="ya29.<access-token>",   # OAuth2 access token
+    use_tls=True,
+)
+result = sender.send_email("to@example.com", "Subject", "Body")
+```
 
 ### Custom Exception Classes
 
@@ -550,16 +602,16 @@ The module defines a detailed exception hierarchy:
 - `SMTPConnectionError`: SMTP connection error
 - `AttachmentError`: Attachment handling error
 - `SizeLimitError`: Attachment size limit error
-- `RateLimitError`: Send rate limit exceeded (enforced since 2.2.1)
+- `RateLimitError`: Send rate limit exceeded (enforced since 2.2.0)
 - `ContentValidationError`: Content validation error
 
-> Since 2.2.1: `SizeLimitError` is raised directly (not wrapped into `AttachmentError`), so callers can distinguish "attachment too large" from other attachment errors (e.g. missing file).
+> Since 2.2.0: `SizeLimitError` is raised directly (not wrapped into `AttachmentError`), so callers can distinguish "attachment too large" from other attachment errors (e.g. missing file).
 
 ### SendResult Class
 
 Returns SendResult object after sending email, containing the following attributes:
 
-- `success` (bool): Whether sending was successful
+- `success` (bool): Whether the SMTP server **accepted** the mail (acceptance ≠ delivery; confirming actual delivery requires bounce/read-receipt handling, e.g. `is_delivery_status_notification`)
 - `message_id` (str): Email message ID
 - `error_detail` (str): Error details
 - `accepted_recipients` (list): List of accepted recipients
@@ -573,24 +625,33 @@ Supports multiple configuration methods with the following priority:
 2. config_dict
 3. Environment variables
 4. Configuration file
+5. OS keyring (used when `password_from_keyring=True`)
 
 Environment variable names:
 - `SMTP_SERVER`: SMTP server address
 - `SMTP_PORT`: SMTP server port
 - `SMTP_EMAIL`: Sender email
 - `SMTP_PASSWORD`: Sender password or authorization code
+- `SMTP_OAUTH2_TOKEN`: OAuth2 access token (when provided, XOAUTH2 authentication is used instead of the password)
 
 ### Retry Mechanism
 
 The send_email method supports the max_retries parameter with a default of 2 retries, using exponential backoff with random jitter and total timeout control.
 
-Since 2.2.1: retries reuse the same `Message-ID` (idempotent). Message building and attachment handling are performed once outside the retry loop, so deterministic errors are raised immediately and never retried. If the server closes the connection during send (`SMTPServerDisconnected`), the email may already be delivered and is NOT blindly retried — the returned `SendResult` notes "may already be delivered".
+Since 2.2.0: retries reuse the same `Message-ID` (idempotent). Message building and attachment handling are performed once outside the retry loop, so deterministic errors are raised immediately and never retried. If the server closes the connection during send (`SMTPServerDisconnected`), the email may already be delivered and is NOT blindly retried — the returned `SendResult` notes "may already be delivered".
+
+Since 2.3.0, retries follow a **three-tier policy**:
+1. **Deterministic errors** (authentication failure, recipients refused, content/attachment/config/rate-limit errors) are **not retried** — a `SendResult(success=False)` is returned immediately.
+2. **Server disconnect** (delivery status unknown) is **not blindly retried** to avoid duplicate delivery.
+3. **Transient network errors** (timeout, connection reset, temporary SMTP failures) are **retried** with exponential backoff. Backoff is configurable via `retry_delay_base` (default 2.0s), `retry_delay_max` (default 60.0s) and `retry_jitter` (default 1.0).
 
 ### Asynchronous Support
 
 Provides async_send_email asynchronous function and batch_send batch sending feature, requires aiosmtplib library.
 
-Since 2.2.1: async sending supports `use_ssl` (SMTP over SSL, port 465) in addition to STARTTLS.
+Since 2.2.0: async sending supports `use_ssl` (SMTP over SSL, port 465) in addition to STARTTLS.
+
+Since 2.3.0: `async_send_email` accepts `timeout`, `use_tls`, `use_ssl` and `keep_alive`, aligning it with the synchronous API. When `keep_alive=True`, reuse the connection and release it with `await sender.aclose()`.
 
 ### Template Rendering
 

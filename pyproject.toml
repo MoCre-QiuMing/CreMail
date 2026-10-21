@@ -4,18 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "CreMail"
-version = "2.2.1"
+version = "2.3.0"
 authors = [
     {name = "QiuMing", email = "mocre_rx@foxmail.com"},
 ]
 description = "A powerful and easy-to-use Python email sending module with support for multiple configuration methods, async sending, and verification code generation."
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+keywords = ["email", "smtp", "send", "async", "verification", "code"]
 requires-python = ">=3.8"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -27,7 +27,8 @@ classifiers = [
     "Topic :: Communications :: Email",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-# 同步发信零依赖：异步/模板能力按需安装（pip install git+...CreMail.git[async] / [template] / [all]）
+# 同步发信完全零依赖（smtplib 为标准库）。
+# aiosmtplib / jinja2 为可选依赖，见下方 [project.optional-dependencies]，按需安装。
 dependencies = []
 
 [project.optional-dependencies]

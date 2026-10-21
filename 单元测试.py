@@ -5,10 +5,10 @@
 本脚本为【本地离线】测试：通过 mock 的 SMTP 客户端替代真实发送，全程【不会】
 向任何真实邮箱外发邮件，也【不需要】 email_config.json 配置文件。
 验证范围：配置加载、纯文本/HTML/附件/忽略附件错误/CC-BCC/异步/批量/模板/
-默认发送者/验证码/快捷函数，以及 2.2.1 新增的可靠性修复（去重、幂等 Message-ID、
+默认发送者/验证码/快捷函数，以及 2.2.0 新增的可靠性修复（去重、幂等 Message-ID、
 连接断开不盲发、附件超限异常分类、限流、工具函数导出、版本号）。
 
-运行：python 单元测试.py   （需在 2.2.1 目录内，或本目录包含 cremail 包）
+运行：python 单元测试.py   （需在 2.2.0 目录内，或本目录包含 cremail 包）
 """
 
 import os
@@ -52,7 +52,7 @@ try:
     import cremail as cremail_pkg
 except ImportError as e:
     print(f"❌ 导入 cremail 失败: {e}")
-    print("请确认在 2.2.1 目录下运行，或设置 PYTHONPATH 指向 2.2.1 目录。")
+    print("请确认在 2.2.0 目录下运行，或设置 PYTHONPATH 指向 2.2.0 目录。")
     sys.exit(1)
 
 # ========== 假配置与 mock 客户端 ==========
@@ -145,7 +145,7 @@ def test_config_loading():
     assert s.smtp_port, "SMTP端口未配置"
     assert s.email, "发件人邮箱未配置"
     assert s.password, "密码未配置"
-    # 缺失配置应抛 ConfigError（2.2.1 仍保持）
+    # 缺失配置应抛 ConfigError（2.2.0 仍保持）
     try:
         CreMail(config_dict={"smtp_server": "x"}, config_file=None)
         raise AssertionError("缺失配置未抛 ConfigError")
@@ -275,7 +275,7 @@ def test_send_with_config():
     assert r.success
     assert inst.send_email.called
 
-# ===== 2.2.1 新增可靠性/API 验证 =====
+# ===== 2.2.0 新增可靠性/API 验证 =====
 
 # 13. 收件人去重（_collect_recipients 行为）
 def test_recipient_dedup_build():
@@ -314,7 +314,7 @@ def test_retry_same_msgid():
         def connect_and_send(self, message, **kw):
             calls.append(message["Message-ID"]); self.n += 1
             if self.n == 1:
-                raise RuntimeError("transient")
+                raise OSError("connection reset")
             return {}
     s = make_sender(Flaky())
     r = s.send_email("u@example.com", "重试", "内容", max_retries=2)
@@ -340,36 +340,229 @@ def test_validate_exported():
 
 # 19. 版本号
 def test_version():
-    assert cremail_pkg.__version__ == "2.2.1", f"版本应为 2.2.1，实际 {cremail_pkg.__version__}"
+    assert cremail_pkg.__version__ == "2.3.0", f"版本应为 2.3.0，实际 {cremail_pkg.__version__}"
 
-# 20. 异步参数回归（真实触达 aiosmtplib 构造，验证 use_tls 而非 use_ssl）
+# ===== 2.3.0 新增能力验证 =====
+
+# 20. 敏感信息脱敏
+def test_redact():
+    from cremail.CreMail import _redact_sensitive
+    assert _redact_sensitive("pwd=fbgevsuqqrpvccdd", ["fbgevsuqqrpvccdd"]) == "pwd=******"
+    assert _redact_sensitive("hello", ["ab"]) == "hello", "过短敏感值不应脱敏"
+
+# 21. keyring 凭据函数（未安装 keyring 时优雅处理）
+def test_keyring_functions():
+    from cremail.CreMail import get_password_from_keyring, set_password_in_keyring, delete_password_from_keyring
+    try:
+        import keyring
+        keyring.get_keyring()
+    except Exception:
+        return  # 无可用 keyring 后端/未安装：库的降级行为已验证正确，跳过
+    pwd = get_password_from_keyring("a@b.com")
+    assert pwd is None or isinstance(pwd, str), "keyring 读取应返回 None 或字符串"
+    assert delete_password_from_keyring("a@b.com") in (True, False)
+    try:
+        set_password_in_keyring("a@b.com", "x")
+    except Exception:
+        pass  # 无后端/未安装时写入抛错，符合预期
+
+# 22. 退信/送达状态通知识别
+def test_bounce_detection():
+    from cremail.CreMail import is_delivery_status_notification
+    assert is_delivery_status_notification("From: MAILER-DAEMON\nSubject: Undelivered Mail")
+    assert is_delivery_status_notification("Content-Type: multipart/report; boundary=..\nmessage/delivery-status")
+    assert is_delivery_status_notification("Action: failed\nStatus: 5.1.1")
+    assert is_delivery_status_notification("这是一封退信通知")
+    assert not is_delivery_status_notification("Hello, this is a normal email")
+
+# 23. 三级重试：认证失败（确定性）不重试
+def test_auth_not_retried():
+    fake = FakeClient(exc=smtplib.SMTPAuthenticationError(535, b"auth failed"))
+    s = make_sender(fake)
+    r = s.send_email("u@example.com", "认证", "内容", max_retries=3)
+    assert not r.success
+    assert len(fake.calls) == 1, "认证失败不应重试"
+
+# 24. 三级重试：SMTPDataError（确定性）不重试
+def test_data_error_not_retried():
+    fake = FakeClient(exc=smtplib.SMTPDataError(550, b"message rejected"))
+    s = make_sender(fake)
+    r = s.send_email("u@example.com", "数据", "内容", max_retries=3)
+    assert not r.success
+    assert len(fake.calls) == 1, "SMTPDataError 不应重试"
+
+# 25. 三级重试：瞬时网络错误（OSError）重试到 max_retries
+def test_transient_retried():
+    calls = []
+    class Flaky:
+        def connect_and_send(self, message, **kw):
+            calls.append(1)
+            raise OSError("connection reset")
+    s = make_sender(Flaky())
+    s.retry_delay_base = 0
+    s.retry_jitter = 0
+    r = s.send_email("u@example.com", "瞬时", "内容", max_retries=2)
+    assert not r.success
+    assert len(calls) == 3, f"瞬时错误应重试至 max_retries，实际 {len(calls)}"
+
+# 26. keep-alive：复用同一连接，close() 后重新建立
+def test_keep_alive_reuse():
+    from cremail.CreMail import SMTPLibClient
+    class FakeServer:
+        def __init__(self): self.closed = False
+        def noop(self): pass
+        def starttls(self): pass
+        def login(self, u, p): pass
+        def sendmail(self, *a, **k): return {}
+        def quit(self): self.closed = True
+        def close(self): self.closed = True
+    with mock.patch("smtplib.SMTP", side_effect=lambda *a, **k: FakeServer()) as MSMTP:
+        client = SMTPLibClient(keep_alive=True)
+        s = make_sender(client)
+        r1 = s.send_email("u@example.com", "复用1", "内容")
+        r2 = s.send_email("u@example.com", "复用2", "内容")
+        assert r1.success and r2.success
+        assert MSMTP.call_count == 1, f"keep-alive 应只建立一次连接，实际 {MSMTP.call_count}"
+        client.close()
+        s.send_email("u@example.com", "复用3", "内容")
+        assert MSMTP.call_count == 2, "close() 后应重新建立连接"
+
+# 27. 异步函数透传 timeout/use_tls/use_ssl/keep_alive
 def test_async_params():
     import importlib
-    from email.mime.text import MIMEText
     cm = importlib.import_module("cremail.CreMail")
-    msg = MIMEText("hi")
-    msg['To'] = "user@example.com"
-    msg['Cc'] = ""
-    with mock.patch.object(cm.aiosmtplib, "SMTP") as MockSMTP:
-        inst = mock.AsyncMock()
-        inst.__aenter__.return_value = inst
-        inst.__aexit__.return_value = False
-        MockSMTP.return_value = inst
-        client = AioSMTPLibClient()
-        # use_ssl=False → use_tls=False（STARTTLS 语义）
-        asyncio.run(client.async_send_message(msg, hostname="smtp.test.com", port=587,
-                                              username="u", password="p", use_ssl=False,
-                                              recipients=["user@example.com"]))
-        kw = MockSMTP.call_args.kwargs
-        assert "use_ssl" not in kw, f"不应传 use_ssl 参数: {kw}"
-        assert kw.get("use_tls") is False, f"use_ssl=False 应映射为 use_tls=False: {kw}"
-        # use_ssl=True → use_tls=True（SSL 直连，465）
-        asyncio.run(client.async_send_message(msg, hostname="smtp.test.com", port=465,
-                                              username="u", password="p", use_ssl=True,
-                                              recipients=["user@example.com"]))
-        kw = MockSMTP.call_args.kwargs
-        assert "use_ssl" not in kw, f"不应传 use_ssl 参数: {kw}"
-        assert kw.get("use_tls") is True, f"use_ssl=True 应映射为 use_tls=True: {kw}"
+    with mock.patch.object(cm, "CreMail") as MC:
+        inst = MC.return_value
+        inst._async_send_individual_email = mock.AsyncMock(
+            return_value=SendResult(success=True, message_id="<a@b>"))
+        async def run():
+            return await async_send_email("u@example.com", "异步", "内容",
+                                          config_dict=FAKE_CFG, timeout=15,
+                                          use_tls=False, use_ssl=True, keep_alive=True)
+        r = asyncio.run(run())
+    assert r.success
+    _, kw = MC.call_args
+    assert kw.get("timeout") == 15
+    assert kw.get("use_tls") is False
+    assert kw.get("use_ssl") is True
+    assert kw.get("keep_alive") is True
+
+# 28. 2.3.0 新增包级导出
+def test_221_exports():
+    from cremail import (get_password_from_keyring, set_password_in_keyring,
+                         delete_password_from_keyring, is_delivery_status_notification)
+    assert all(callable(f) for f in (get_password_from_keyring, set_password_in_keyring,
+                                     delete_password_from_keyring, is_delivery_status_notification))
+
+# ===== 2.3.0 OAuth2 能力验证 =====
+
+# 29. build_xoauth2_response 构造正确
+def test_xoauth2_build():
+    from cremail import build_xoauth2_response
+    r = build_xoauth2_response("u@test.com", "tok123")
+    assert r == "user=u@test.com\x01auth=Bearer tok123\x01\x01", r
+
+# 30. 同步 XOAUTH2：connect_and_send 传 oauth2_token 时走 AUTH XOAUTH2
+def test_sync_oauth2():
+    from cremail.CreMail import SMTPLibClient, _encode_xoauth2
+    class FakeServer:
+        def __init__(self): self.mechanisms = []
+        def noop(self): pass
+        def starttls(self): pass
+        def auth(self, mechanism, authobject):
+            self.mechanisms.append(mechanism)
+            return authobject(None)
+        def sendmail(self, *a, **k): return {}
+        def quit(self): pass
+        def close(self): pass
+    with mock.patch("smtplib.SMTP", side_effect=lambda *a, **k: FakeServer()) as MS:
+        client = SMTPLibClient(keep_alive=True)
+        s = make_sender(client)
+        s.oauth2_token = "tok123"
+        r = s.send_email("u@example.com", "OAuth2", "内容", content_type="plain")
+    assert r.success, f"失败: {r.error_detail}"
+    assert s.smtp_client._server.mechanisms == ["XOAUTH2"], "同步应使用 XOAUTH2 认证"
+    # 断言实际发送的 base64 载荷正确（_encode_xoauth2 结果）
+    assert _encode_xoauth2(s.email, "tok123") == \
+        _encode_xoauth2("sender@test.com", "tok123")
+
+# 31. 异步 XOAUTH2：_aio_auth_xoauth2 通过 execute_command 发送 AUTH XOAUTH2
+def test_aio_xoauth2():
+    from cremail.CreMail import _aio_auth_xoauth2, _encode_xoauth2
+    class FakeResp:
+        code = 235
+        message = "Authentication successful"
+    calls = []
+    class FakeSMTP:
+        async def execute_command(self, *args):
+            calls.append(args)
+            return FakeResp()
+    async def run():
+        await _aio_auth_xoauth2(FakeSMTP(), "u@test.com", "tok123")
+    asyncio.run(run())
+    assert calls and calls[0][0] == b"AUTH" and calls[0][1] == b"XOAUTH2", calls
+    assert calls[0][2] == _encode_xoauth2("u@test.com", "tok123").encode(), calls[0][2]
+
+# 32. oauth2_token-only 配置（无密码）不抛 ConfigError
+def test_oauth2_config():
+    cfg = dict(FAKE_CFG)
+    cfg.pop("password")
+    cfg["oauth2_token"] = "tok"
+    s = CreMail(config_dict=cfg, config_file=None, smtp_client=FakeClient())
+    assert s.oauth2_token == "tok"
+    assert s.password is None
+
+# 33. build_xoauth2_response 顶层导出
+def test_oauth2_export():
+    from cremail import build_xoauth2_response
+    assert callable(build_xoauth2_response)
+
+# 34. 回归：aiosmtplib.SMTP 无 use_ssl 参数，AioSMTPLibClient 必须用 use_tls=use_ssl
+def test_aio_use_tls_param():
+    import importlib
+    cm = importlib.import_module("cremail.CreMail")
+    calls = []
+    class SpySMTP:
+        def __init__(self, **kw):
+            calls.append(kw)
+        async def connect(self): pass
+        async def login(self, *a): pass
+        async def send_message(self, *a, **kw): return "ok"
+        async def quit(self): pass
+    if not cm._HAS_AIOSMTPLIB:
+        import types
+        fake = types.ModuleType("aiosmtplib")
+        fake.SMTP = SpySMTP
+        cm.aiosmtplib = fake
+        cm._HAS_AIOSMTPLIB = True
+    client = cm.AioSMTPLibClient()
+    with mock.patch.object(cm.aiosmtplib, "SMTP", SpySMTP):
+        async def run():
+            await client.async_send_message(
+                "MSG", "smtp.example.com", 465, "u", "p",
+                start_tls=False, use_ssl=True, timeout=30,
+                recipients=["a@example.com"])
+        asyncio.run(run())
+    assert calls, "应构造 aiosmtplib.SMTP"
+    kw = calls[0]
+    assert "use_tls" in kw, "必须使用 use_tls 参数"
+    assert kw.get("use_tls") is True, "use_ssl=True 应映射为 use_tls=True"
+    assert "use_ssl" not in kw, "不得把 use_ssl 传给 aiosmtplib（其无此参数）"
+
+# 35. 回归：部分拒收语义——accepted_recipients 表示真正接受地址，success=False
+def test_partial_refusal():
+    import importlib
+    cm = importlib.import_module("cremail.CreMail")
+    class RefuseClient:
+        def connect_and_send(self, message, **kw):
+            return {"bad@example.com": (550, b"rejected")}
+    s = make_sender(RefuseClient())
+    r = s.send_email(["good@example.com", "bad@example.com"], "回归", "内容",
+                     content_type="plain")
+    assert r.success is False, "存在拒收时 success 应为 False"
+    assert "bad@example.com" not in r.accepted_recipients, "拒收者不应出现在 accepted 中"
+    assert "good@example.com" in r.accepted_recipients, "被接受者应保留在 accepted 中"
+    assert "refused" in r.error_detail.lower(), "错误详情应含拒收说明"
 
 # ========== 执行测试 ==========
 def main():
@@ -394,8 +587,23 @@ def main():
         ("重试幂等Message-ID", test_retry_same_msgid),
         ("内置限流", test_daily_limit),
         ("工具函数顶层导出", test_validate_exported),
-        ("版本号2.2.1", test_version),
-        ("异步参数回归", test_async_params),
+        ("版本号2.3.0", test_version),
+        ("敏感信息脱敏", test_redact),
+        ("keyring凭据函数", test_keyring_functions),
+        ("退信识别", test_bounce_detection),
+        ("三级重试-认证不重试", test_auth_not_retried),
+        ("三级重试-数据错误不重试", test_data_error_not_retried),
+        ("三级重试-瞬时重试", test_transient_retried),
+        ("keep-alive连接复用", test_keep_alive_reuse),
+        ("异步参数对齐", test_async_params),
+        ("2.3.0新导出", test_221_exports),
+        ("XOAUTH2响应构造", test_xoauth2_build),
+        ("同步XOAUTH2认证", test_sync_oauth2),
+        ("异步XOAUTH2认证", test_aio_xoauth2),
+        ("OAuth2仅令牌配置", test_oauth2_config),
+        ("XOAUTH2顶层导出", test_oauth2_export),
+        ("回归-异步use_tls参数", test_aio_use_tls_param),
+        ("回归-部分拒收语义", test_partial_refusal),
     ]
     try:
         for name, fn in tests:

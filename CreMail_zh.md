@@ -34,15 +34,15 @@
 
 关于 CreMail 与原生 **smtplib** 的关系，以及封装带来的代价，做一个客观说明：
 
-**依赖问题**：同步发信完全零依赖（**smtplib** 是标准库），安装 CreMail 不会额外拉取任何依赖。异步发送与模板渲染为可选能力，需要时通过 extras 安装：
+**依赖问题**：同步发信完全零依赖（**smtplib** 是标准库）；异步发送和模板渲染需要 **aiosmtplib** 与 **jinja2**，作为可选依赖通过 extras 按需安装：
 
 ```bash
 pip install git+https://github.com/MoCre-QiuMing/CreMail.git              # 同步零依赖
-pip install git+https://github.com/MoCre-QiuMing/CreMail.git[async]       # 异步发送
+pip install git+https://github.com/MoCre-QiuMing/CreMail.git[async]       # 仅异步
 pip install git+https://github.com/MoCre-QiuMing/CreMail.git[all]         # 异步 + 模板
 ```
 
-只有当你选择直接复制 **cremail.py** 源码扔进项目时，才需要自行安装 `aiosmtplib` / `jinja2`。
+只有当你选择直接复制 **cremail.py** 源码扔进项目时，才需要注意这两个依赖。
 
 **底层控制**：如果你需要执行极端的底层 SMTP 扩展命令或进行精细的 socket 层操作，原生 **smtplib** 更灵活；但在 99% 的业务场景下，CreMail 的封装层性能损耗几乎可以忽略不计。
 
@@ -63,26 +63,34 @@ pip install git+https://github.com/MoCre-QiuMing/CreMail.git[all]         # 异�
 - **邮箱验证**: 发送前验证邮箱格式，避免无效地址
 - **优先级支持**: 支持邮件优先级设置
 - **全局实例**: 提供默认实例，减少重复配置
-- **幂等Message-ID**: 每封邮件（含重试）复用由`make_msgid()`生成的真实Message-ID，便于去重与追踪（2.2.1）
-- **防重复发送**: 发送过程中服务端断开连接（邮件可能已投递，如QQ短时频控）时，不再盲目重试，返回"投递状态未知"结果（2.2.1）
-- **内置限流**: `daily_send_limit`和`rate_limit_delay`自2.2.1起真正生效
-- **工具函数导出**: `validate_email_address`、`validate_email_list`、`format_email_with_name`已在包顶层导出（2.2.1）
-- **异步SSL支持**: 异步发送支持`use_ssl`（SMTP over SSL，465端口）（2.2.1）
+- **幂等Message-ID**: 每封邮件（含重试）复用由`make_msgid()`生成的真实Message-ID，便于去重与追踪（2.2.0）
+- **防重复发送**: 发送过程中服务端断开连接（邮件可能已投递，如QQ短时频控）时，不再盲目重试，返回"投递状态未知"结果（2.2.0）
+- **内置限流**: `daily_send_limit`和`rate_limit_delay`自2.2.0起真正生效
+- **工具函数导出**: `validate_email_address`、`validate_email_list`、`format_email_with_name`已在包顶层导出（2.2.0）
+- **异步SSL支持**: 异步发送支持`use_ssl`（SMTP over SSL，465端口）（2.2.0）
+- **凭据安全治理**: 支持从系统keyring读取/写入/删除密码或授权码（`get_password_from_keyring` / `set_password_in_keyring` / `delete_password_from_keyring`），日志中的敏感信息自动脱敏（2.3.0）
+- **三级重试策略**: 确定性错误从不重试；服务端断开（投递状态未知）不盲目重试；瞬时网络错误按可配置的指数退避重试（`retry_delay_base` / `retry_delay_max` / `retry_jitter`）（2.3.0）
+- **连接复用（keep-alive）**: `keep_alive=True` 复用SMTP连接以减少握手开销；提供 `close()` / `aclose()` 显式释放（2.3.0）
+- **异步/同步API对齐**: `async_send_email` 现支持 `timeout`、`use_tls`、`use_ssl`、`keep_alive`（2.3.0）
+- **送达语义与退信识别**: `success=True` 仅代表服务端受理，不等于已送达；`is_delivery_status_notification()` 可识别退信/送达状态通知（2.3.0）
+- **OAuth2 认证支持**: 通过 `oauth2_token` 直接使用 OAuth2 访问令牌发信（XOAUTH2 SASL），无需密码/授权码，同步与异步均支持（2.3.0）
 
 ## 📊 与其他邮件模块对比
 
 | 特性 | CreMail | smtplib | yagmail | aiosmtplib |
 |------|---------|---------|---------|------------|
-| 配置管理 | ✅ 高级 | ❌ 基础 | ✅ 中等 | ❌ 无 |
-| 异步支持 | ✅ 完整 | ❌ 同步 | ❌ 同步 | ✅ 完整 |
-| 批量发送 | ✅ 高性能 | ❌ 无 | ❌ 无 | ❌ 无 |
-| 智能重试 | ✅ 高级 | ❌ 无 | ❌ 基础 | ❌ 无 |
-| 并发控制 | ✅ 高级 | ❌ 无 | ❌ 无 | ❌ 无 |
-| 密码安全 | ✅ 高级 | ❌ 基础 | ❌ 基础 | ❌ 基础 |
+| 异步支持 | ✅ 内置 | ❌ 仅同步 | ❌ 仅同步 | ✅ 内置 |
+| 批量发送 | ✅ 内置 | ❌ 需自行实现 | ❌ 需自行实现 | ❌ 需自行实现 |
+| 重试策略 | ✅ 内置（三级） | ❌ 需自行实现 | ❌ 需自行实现 | ❌ 需自行实现 |
+| 并发控制 | ✅ 内置 | ❌ 需自行实现 | ❌ 需自行实现 | ❌ 需自行实现 |
+| 配置管理 | ✅ 内置（多来源） | ❌ 需自行实现 | ✅ 简化 API | ❌ 需自行实现 |
+| 密码安全 | ✅ 回调 / keyring / 脱敏 | ❌ 需自行处理 | ✅ 简化 | ❌ 需自行处理 |
 | 验证码生成 | ✅ 内置 | ❌ 无 | ❌ 无 | ❌ 无 |
-| 模块化设计 | ✅ 高级 | ❌ 低 | ❌ 中等 | ❌ 低 |
-| 显示名称 | ✅ 支持 | ✅ 支持 | ✅ 支持 | ❌ 无 |
-| 邮箱验证 | ✅ 预发送验证 | ❌ 发送阶段验证 | ❌ 发送阶段验证 | ❌ 发送阶段验证 |
+| 模块化设计 | ✅ 内置 | ❌ 无 | ❌ 无 | ❌ 无 |
+| 显示名称 | ✅（email 库 formataddr） | ✅（email 库） | ✅（email 库） | ✅（email 库） |
+| 邮箱验证 | ✅ 内置预校验 | ❌ 无内置 | ❌ 无内置 | ❌ 无内置 |
+
+> 客观口径说明："内置"表示开箱即用；"需自行实现"表示需要自行编写代码，而非库缺陷。显示名称由标准库 `email` 的 `formataddr()` 提供，四种方案均可用；邮箱验证栏中 smtplib/yagmail/aiosmtplib 均不提供内置地址校验。
 
 CreMail在功能完整性、安全性和易用性方面优于其他模块，适合需要高性能和高安全性的场景。
 
@@ -369,7 +377,7 @@ except Exception as e:
     print(f"其他错误: {e}")
 ```
 
-> **错误语义（自2.2.1起）**: 确定性错误——非法收件人（`ValueError`）、内容为空/非法（`ContentValidationError`）、附件超限（`SizeLimitError`）等校验与构建错误——会**直接抛出异常**且不会被重试；网络/发送类错误（认证失败、连接断开、超时）则返回 `SendResult(success=False)`。请在 try/except 中处理校验错误，并检查 `result.success` 处理发送错误。
+> **错误语义（自2.2.0起）**: 确定性错误——非法收件人（`ValueError`）、内容为空/非法（`ContentValidationError`）、附件超限（`SizeLimitError`）等校验与构建错误——会**直接抛出异常**且不会被重试；网络/发送类错误（认证失败、连接断开、超时）则返回 `SendResult(success=False)`。请在 try/except 中处理校验错误，并检查 `result.success` 处理发送错误。
 
 ### 方法9: 使用重试机制
 
@@ -387,7 +395,7 @@ result = sender.send_email(
 )
 ```
 
-> **注意（自2.2.1起）**: 重试会复用同一个 `Message-ID`。若发送过程中服务端断开连接（`SMTPServerDisconnected`），邮件可能已被投递，CreMail 不会自动重试，而是返回标注"可能已送达"的 `SendResult`——请不要盲目重发同一封邮件。
+> **注意（自2.2.0起）**: 重试会复用同一个 `Message-ID`。若发送过程中服务端断开连接（`SMTPServerDisconnected`），邮件可能已被投递，CreMail 不会自动重试，而是返回标注"可能已送达"的 `SendResult`——请不要盲目重发同一封邮件。
 
 ### 方法10: 使用异步发送
 
@@ -447,7 +455,7 @@ asyncio.run(batch_send_example())
 
 ### 类: CreMail
 
-#### `__init__(self, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, config_provider=None, max_attachment_size=10485760, timeout=30, use_tls=True, use_ssl=False, provider_priority=False, from_display_name=None, smtp_client=None, password_callback=None, log_file=None)`
+#### `__init__(self, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, config_provider=None, max_attachment_size=10485760, timeout=30, use_tls=True, use_ssl=False, provider_priority=False, from_display_name=None, smtp_client=None, password_callback=None, log_file=None, keep_alive=False, password_from_keyring=False, oauth2_token=None, retry_delay_base=2.0, retry_delay_max=60.0, retry_jitter=1.0)`
 
 初始化邮件发送器。
 
@@ -468,6 +476,12 @@ asyncio.run(batch_send_example())
 - `smtp_client` (SMTPClient, 可选): SMTP客户端实现
 - `password_callback` (callable, 可选): 密码获取回调函数
 - `log_file` (str, 可选): 日志文件路径，用于将日志写入文件。可以是绝对路径或相对路径（相对于当前工作目录）。默认: None，仅输出到控制台
+- `keep_alive` (bool): 跨多次发送复用SMTP连接以减少握手开销；用 `close()`（同步）/ `aclose()`（异步）显式释放（2.3.0）
+- `password_from_keyring` (bool): 当未通过其他方式提供密码时，从系统keyring（服务名 `CreMail`）读取密码/授权码（2.3.0）
+- `oauth2_token` (str, 可选): OAuth2 访问令牌。提供后使用 XOAUTH2 认证发信，无需密码/授权码；令牌自动纳入日志脱敏（2.3.0）
+- `retry_delay_base` (float): 指数退避的基础延迟秒数（默认: 2.0）（2.3.0）
+- `retry_delay_max` (float): 单次退避最大延迟秒数（默认: 60.0）（2.3.0）
+- `retry_jitter` (float): 退避延迟的随机抖动范围乘数（默认: 1.0）（2.3.0）
 
 #### `send_email(self, recipient_email: Union[str, List[str]], subject: str, content: Union[str, dict], content_type: str = "html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", total_timeout: float = None) -> SendResult`
 
@@ -492,11 +506,13 @@ asyncio.run(batch_send_example())
 
 ### 常规函数
 
-#### `send_email_with_config(recipient_email, subject, content, config_file="email_config.json", content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", password_callback=None, total_timeout: float = None, timeout: int = 30, max_attachment_size: int = 10485760, use_tls: bool = True, use_ssl: bool = False) -> SendResult`
+#### `send_email_with_config(recipient_email, subject, content, config_file="email_config.json", content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", password_callback=None, total_timeout: float = None, timeout: int = 30, max_attachment_size: int = 10485760, use_tls: bool = True, use_ssl: bool = False, retry_delay_base: float = 2.0, retry_delay_max: float = 60.0, retry_jitter: float = 1.0, keep_alive: bool = False, password_from_keyring: bool = False, oauth2_token: str = None) -> SendResult`
 
-使用配置文件发送邮件的常规函数。自2.2.1起新增并透传 `total_timeout`、`timeout`、`max_attachment_size`、`use_tls`、`use_ssl` 参数。
+使用配置文件发送邮件的常规函数。自2.2.0起新增并透传 `total_timeout`、`timeout`、`max_attachment_size`、`use_tls`、`use_ssl` 参数；自2.3.0起新增并透传 `retry_delay_base`、`retry_delay_max`、`retry_jitter`、`keep_alive`、`password_from_keyring`。
 
-#### `async_send_email(recipient_email, subject, content, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, max_attachment_size: int = 10485760, total_timeout: float = None, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", from_display_name: str = None, use_tls: bool = True, use_ssl: bool = False) -> SendResult`
+#### `async_send_email(recipient_email, subject, content, smtp_server=None, smtp_port=None, email=None, password=None, config_file="email_config.json", config_dict=None, content_type="html", attachments: List[str] = None, ignore_attachment_errors: bool = False, max_retries: int = 2, max_attachment_size: int = 10485760, total_timeout: float = None, cc_recipients: List[str] = None, bcc_recipients: List[str] = None, reply_to: str = None, priority: Literal["high", "normal", "low"] = "normal", from_display_name: str = None, timeout: int = 30, use_tls: bool = True, use_ssl: bool = False, keep_alive: bool = False, oauth2_token: str = None) -> SendResult`
+
+自2.3.0起，`async_send_email` 新增 `timeout`、`use_tls`、`use_ssl`、`keep_alive` 参数，与同步API对齐。
 
 异步发送邮件的函数（需要安装aiosmtplib库）。
 
@@ -531,15 +547,51 @@ asyncio.run(batch_send_example())
 
 #### `validate_email_address(email: str) -> bool`
 
-校验邮箱地址是否有效。自2.2.1起在包顶层导出。
+校验邮箱地址是否有效。自2.2.0起在包顶层导出。
 
 #### `validate_email_list(emails: List[str]) -> List[str]`
 
-校验邮箱地址列表，若存在非法地址则抛出 `ValueError`。自2.2.1起在包顶层导出。
+校验邮箱地址列表，若存在非法地址则抛出 `ValueError`。自2.2.0起在包顶层导出。
 
 #### `format_email_with_name(email: str, display_name: str) -> str`
 
-将邮箱地址与显示名称组合为 `"名称 <邮箱>"` 格式。自2.2.1起在包顶层导出。
+将邮箱地址与显示名称组合为 `"名称 <邮箱>"` 格式。自2.2.0起在包顶层导出。
+
+> **依赖说明**：Keyring 为可选依赖。未安装时，读取（`get_password_from_keyring`）会安全返回 `None`，但写入/删除（`set_password_in_keyring`、`delete_password_from_keyring`）会抛 `ImportError`。如需使用 Keyring 凭据存取，请先安装：`pip install keyring`。
+
+#### `get_password_from_keyring(email: str, service: str = "CreMail") -> Optional[str]`
+
+从系统keyring读取 `email` 对应的密码/授权码。若未安装 `keyring` 或没有对应条目则返回 `None`。（2.3.0）
+
+#### `set_password_in_keyring(email: str, password: str, service: str = "CreMail") -> bool`
+
+将密码/授权码安全存入系统keyring。未安装 `keyring` 时抛出 `ImportError`，失败时抛出 `ConfigError`。（2.3.0）
+
+#### `delete_password_from_keyring(email: str, service: str = "CreMail") -> bool`
+
+从keyring删除 `email` 对应的密码条目。条目不存在或 `keyring` 不可用时返回 `False`。（2.3.0）
+
+#### `is_delivery_status_notification(message_text: str) -> bool`
+
+识别邮件是否为退信/送达状态通知（NDR/DSN），检测 `MAILER-DAEMON`/`postmaster` 发件、`multipart/report`、`message/delivery-status`、`reporting-mta`、`final-recipient`、`action: failed`、`status: 4.`/`5.` 及常见退信关键词。可用于将投递失败与原始 `Message-ID` 关联。（2.3.0）
+
+#### `build_xoauth2_response(username: str, access_token: str) -> str`
+
+构造 XOAUTH2 SASL 认证的初始响应文本（`user=<邮箱>\x01auth=Bearer <令牌>\x01\x01`，未 base64）。配合 `oauth2_token` 使用，适用于 Gmail / Outlook 等支持 XOAUTH2 的 SMTP 服务，已在包顶层导出。（2.3.0）
+
+使用示例：
+
+```python
+from cremail import CreMail
+
+sender = CreMail(
+    smtp_server="smtp.gmail.com", smtp_port=587,
+    email="you@gmail.com",
+    oauth2_token="ya29.<access-token>",   # OAuth2 访问令牌
+    use_tls=True,
+)
+result = sender.send_email("to@example.com", "标题", "内容")
+```
 
 ### 自定义异常类
 
@@ -550,16 +602,16 @@ asyncio.run(batch_send_example())
 - `SMTPConnectionError`: SMTP连接错误
 - `AttachmentError`: 附件处理错误
 - `SizeLimitError`: 附件大小限制错误
-- `RateLimitError`: 发送频率限制错误（自2.2.1起真正生效）
+- `RateLimitError`: 发送频率限制错误（自2.2.0起真正生效）
 - `ContentValidationError`: 内容验证错误
 
-> 自2.2.1起：`SizeLimitError` 会直接抛出（不再被包装成 `AttachmentError`），调用方可区分"附件超限"与其他附件错误（如文件缺失）。
+> 自2.2.0起：`SizeLimitError` 会直接抛出（不再被包装成 `AttachmentError`），调用方可区分"附件超限"与其他附件错误（如文件缺失）。
 
 ### SendResult类
 
 发送邮件后返回SendResult对象，包含以下属性：
 
-- `success` (bool): 发送是否成功
+- `success` (bool): 是否被SMTP服务器**受理**（受理≠送达；确认实际送达需要退信/回执处理，如 `is_delivery_status_notification`）
 - `message_id` (str): 邮件消息ID
 - `error_detail` (str): 错误详情
 - `accepted_recipients` (list): 已接受的收件人列表
@@ -573,24 +625,33 @@ asyncio.run(batch_send_example())
 2. config_dict
 3. 环境变量
 4. 配置文件
+5. 系统keyring（当 `password_from_keyring=True` 时使用）
 
 环境变量名称：
 - `SMTP_SERVER`: SMTP服务器地址
 - `SMTP_PORT`: SMTP服务器端口
 - `SMTP_EMAIL`: 发送者邮箱
 - `SMTP_PASSWORD`: 发送者密码或授权码
+- `SMTP_OAUTH2_TOKEN`: OAuth2 访问令牌（提供后使用 XOAUTH2 认证，可替代密码）
 
 ### 重试机制
 
 send_email方法支持max_retries参数，默认为2次重试，使用指数退避算法和随机抖动，并支持总超时控制。
 
-自2.2.1起：重试复用同一个 `Message-ID`（幂等）。消息构建与附件处理在重试循环之外只执行一次，因此确定性错误会立即抛出且从不重试。若发送过程中服务端断开连接（`SMTPServerDisconnected`），邮件可能已被投递，不会盲目重试——返回的 `SendResult` 会标注"可能已送达"。
+自2.2.0起：重试复用同一个 `Message-ID`（幂等）。消息构建与附件处理在重试循环之外只执行一次，因此确定性错误会立即抛出且从不重试。若发送过程中服务端断开连接（`SMTPServerDisconnected`），邮件可能已被投递，不会盲目重试——返回的 `SendResult` 会标注"可能已送达"。
+
+自2.3.0起，重试遵循**三级策略**：
+1. **确定性错误**（认证失败、收件人拒绝、内容/附件/配置/限流错误）**不重试**，立即返回 `SendResult(success=False)`。
+2. **服务端断开**（投递状态未知）**不盲目重试**，避免重复投递。
+3. **瞬时网络错误**（超时、连接重置、临时SMTP失败）**指数退避重试**。退避参数可配置：`retry_delay_base`（默认2.0秒）、`retry_delay_max`（默认60.0秒）、`retry_jitter`（默认1.0）。
 
 ### 异步支持
 
 提供async_send_email异步函数和batch_send批量发送功能，需要安装aiosmtplib库。
 
-自2.2.1起：异步发送除支持STARTTLS外，还支持 `use_ssl`（SMTP over SSL，465端口）。
+自2.2.0起：异步发送除支持STARTTLS外，还支持 `use_ssl`（SMTP over SSL，465端口）。
+
+自2.3.0起：`async_send_email` 支持 `timeout`、`use_tls`、`use_ssl`、`keep_alive`，与同步API对齐。启用 `keep_alive=True` 复用连接时，用 `await sender.aclose()` 释放。
 
 ### 模板渲染
 

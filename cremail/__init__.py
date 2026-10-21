@@ -43,10 +43,15 @@ from .CreMail import (
     get_password_securely,
     validate_email_address,
     validate_email_list,
-    format_email_with_name
+    format_email_with_name,
+    get_password_from_keyring,
+    set_password_in_keyring,
+    delete_password_from_keyring,
+    is_delivery_status_notification,
+    build_xoauth2_response
 )
 
-__version__ = "2.2.1"
+__version__ = "2.3.0"
 __author__ = "QiuMing"
 __license__ = "MIT"
 __all__ = [
@@ -83,5 +88,10 @@ __all__ = [
     'get_password_securely',
     'validate_email_address',
     'validate_email_list',
-    'format_email_with_name'
+    'format_email_with_name',
+    'get_password_from_keyring',
+    'set_password_in_keyring',
+    'delete_password_from_keyring',
+    'is_delivery_status_notification',
+    'build_xoauth2_response'
 ]

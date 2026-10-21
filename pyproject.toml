@@ -27,7 +27,7 @@ classifiers = [
     "Topic :: Communications :: Email",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-# 同步发信零依赖：异步/模板能力按需安装（pip install CreMail[async] / [template] / [all]）
+# 同步发信零依赖：异步/模板能力按需安装（pip install git+...CreMail.git[async] / [template] / [all]）
 dependencies = []
 
 [project.optional-dependencies]
